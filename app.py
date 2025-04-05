@@ -65,5 +65,5 @@ def download_video():
 
 if __name__ == '__main__':
     os.makedirs('downloads', exist_ok=True)
-    # Utilisez le port dynamique fourni par Render
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    # Remarque : app.run() n'est plus nécessaire quand vous utilisez gunicorn.
+    # Le serveur sera démarré par gunicorn automatiquement sur Render.
