@@ -11,9 +11,10 @@ app = Flask(__name__)
 
 # En-têtes HTTP personnalisés pour simuler un navigateur
 DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                  'AppleWebKit/537.36 (KHTML, like Gecko) '
-                  'Chrome/90.0.4430.93 Safari/537.36'
+    'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                   'AppleWebKit/537.36 (KHTML, like Gecko) '
+                   'Chrome/90.0.4430.93 Safari/537.36'),
+    # Vous pouvez ajouter d'autres en-têtes si nécessaire
 }
 
 # Optionnel : utilisation d'un proxy si la variable d'environnement est définie
@@ -27,14 +28,14 @@ def index():
 def video_info():
     data = request.json
     url = data.get('url')
-
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
     ydl_opts = {
         'quiet': True,
         'skip_download': True,
-        'http_headers': DEFAULT_HEADERS
+        'http_headers': DEFAULT_HEADERS,
+        'geo_bypass': True  # Pour essayer de contourner des restrictions géographiques
     }
     if PROXY:
         ydl_opts['proxy'] = PROXY
@@ -42,7 +43,6 @@ def video_info():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-
             if 'formats' not in info:
                 return jsonify({'error': 'No formats available for this video.'}), 404
 
@@ -55,9 +55,9 @@ def video_info():
             } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
 
             return jsonify({
-                'title': info['title'],
-                'thumbnail': info['thumbnail'],
-                'duration': info['duration'],
+                'title': info.get('title'),
+                'thumbnail': info.get('thumbnail'),
+                'duration': info.get('duration'),
                 'formats': formats
             })
     except yt_dlp.utils.DownloadError as e:
@@ -75,18 +75,17 @@ def download_video():
     data = request.json
     url = data.get('url')
     format_id = data.get('format_id')
-
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
 
-    # Utilisation d'un répertoire temporaire
     filename = f"video_{uuid.uuid4().hex}.mp4"
-    output_path = os.path.join("/tmp", filename)  # Utilisation du répertoire temporaire /tmp
+    output_path = os.path.join("/tmp", filename)
 
     ydl_opts = {
         'format': format_id,
         'outtmpl': output_path,
-        'http_headers': DEFAULT_HEADERS
+        'http_headers': DEFAULT_HEADERS,
+        'geo_bypass': True  # Active le contournement géographique
     }
     if PROXY:
         ydl_opts['proxy'] = PROXY
@@ -94,7 +93,7 @@ def download_video():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        return send_file(output_path, as_attachment=True)  # Envoi du fichier directement à l'utilisateur
+        return send_file(output_path, as_attachment=True)
     except yt_dlp.utils.DownloadError as e:
         logging.error(f"Download error: {str(e)}")
         return jsonify({'error': f"Download error: {str(e)}"}), 500
@@ -106,6 +105,5 @@ def download_video():
         return jsonify({'error': 'An unexpected error occurred'}), 500
 
 if __name__ == '__main__':
-    # Port dynamique
-    port = int(os.environ.get('PORT', 5000))  # Utilisation du port dynamique si disponible
+    port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
