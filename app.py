@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request, send_file, jsonify, render_template
 import yt_dlp
 import os
@@ -64,4 +65,5 @@ def download_video():
 
 if __name__ == '__main__':
     os.makedirs('downloads', exist_ok=True)
-    app.run(debug=True)
+    # Utilisez le port dynamique fourni par Render
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
