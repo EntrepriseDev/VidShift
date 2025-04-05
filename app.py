@@ -1,24 +1,24 @@
 import os
+import uuid
 from flask import Flask, request, send_file, jsonify, render_template
 import yt_dlp
-import uuid
-import logging
-
-# Configuration de logging
-logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
-# En-têtes HTTP personnalisés pour simuler un navigateur
+# Création du dossier si nécessaire
+os.makedirs('downloads', exist_ok=True)
+
+# En-têtes HTTP pour simuler un vrai navigateur
 DEFAULT_HEADERS = {
-    'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                   'AppleWebKit/537.36 (KHTML, like Gecko) '
-                   'Chrome/90.0.4430.93 Safari/537.36'),
-    # Vous pouvez ajouter d'autres en-têtes si nécessaire
+    'User-Agent': (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/122.0.0.0 Safari/537.36'
+    )
 }
 
-# Optionnel : utilisation d'un proxy si la variable d'environnement est définie
-PROXY = os.environ.get('PROXY')  # Exemple : "http://votre-proxy:port"
+# (Optionnel) Proxy pour Render si nécessaire
+PROXY = os.getenv("PROXY")  # Exemple : http://user:pass@host:port
 
 @app.route('/')
 def index():
@@ -28,6 +28,7 @@ def index():
 def video_info():
     data = request.json
     url = data.get('url')
+
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
@@ -35,17 +36,15 @@ def video_info():
         'quiet': True,
         'skip_download': True,
         'http_headers': DEFAULT_HEADERS,
-        'geo_bypass': True  # Pour essayer de contourner des restrictions géographiques
+        'geo_bypass': True
     }
+
     if PROXY:
         ydl_opts['proxy'] = PROXY
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            if 'formats' not in info:
-                return jsonify({'error': 'No formats available for this video.'}), 404
-
             formats = [{
                 'format_id': f['format_id'],
                 'ext': f['ext'],
@@ -60,33 +59,30 @@ def video_info():
                 'duration': info.get('duration'),
                 'formats': formats
             })
-    except yt_dlp.utils.DownloadError as e:
-        logging.error(f"Download error: {str(e)}")
-        return jsonify({'error': f"Download error: {str(e)}"}), 500
-    except yt_dlp.utils.ExtractorError as e:
-        logging.error(f"Extractor error: {str(e)}")
-        return jsonify({'error': f"Extractor error: {str(e)}"}), 500
+
     except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}")
-        return jsonify({'error': 'An unexpected error occurred'}), 500
+        return jsonify({'error': f'Info extraction error: {str(e)}'}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
     data = request.json
     url = data.get('url')
     format_id = data.get('format_id')
+
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
 
     filename = f"video_{uuid.uuid4().hex}.mp4"
-    output_path = os.path.join("/tmp", filename)
+    output_path = os.path.join("downloads", filename)
 
     ydl_opts = {
         'format': format_id,
         'outtmpl': output_path,
         'http_headers': DEFAULT_HEADERS,
-        'geo_bypass': True  # Active le contournement géographique
+        'geo_bypass': True,
+        'concurrent_fragment_downloads': 1
     }
+
     if PROXY:
         ydl_opts['proxy'] = PROXY
 
@@ -94,16 +90,8 @@ def download_video():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         return send_file(output_path, as_attachment=True)
-    except yt_dlp.utils.DownloadError as e:
-        logging.error(f"Download error: {str(e)}")
-        return jsonify({'error': f"Download error: {str(e)}"}), 500
-    except yt_dlp.utils.ExtractorError as e:
-        logging.error(f"Extractor error: {str(e)}")
-        return jsonify({'error': f"Extractor error: {str(e)}"}), 500
     except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}")
-        return jsonify({'error': 'An unexpected error occurred'}), 500
+        return jsonify({'error': f'Download error: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=int(os.getenv("PORT", 5000)))
