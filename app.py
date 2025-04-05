@@ -2,6 +2,10 @@ import os
 from flask import Flask, request, send_file, jsonify, render_template
 import yt_dlp
 import uuid
+import logging
+
+# Configuration de logging
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
@@ -21,6 +25,10 @@ def video_info():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            if 'formats' not in info:
+                return jsonify({'error': 'No formats available for this video.'}), 404
+
             formats = [{
                 'format_id': f['format_id'],
                 'ext': f['ext'],
@@ -35,8 +43,15 @@ def video_info():
                 'duration': info['duration'],
                 'formats': formats
             })
+    except yt_dlp.utils.DownloadError as e:
+        logging.error(f"Download error: {str(e)}")
+        return jsonify({'error': f"Download error: {str(e)}"}), 500
+    except yt_dlp.utils.ExtractorError as e:
+        logging.error(f"Extractor error: {str(e)}")
+        return jsonify({'error': f"Extractor error: {str(e)}"}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"Unexpected error: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred'}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -60,9 +75,17 @@ def download_video():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         return send_file(output_path, as_attachment=True)  # Envoi du fichier directement à l'utilisateur
+    except yt_dlp.utils.DownloadError as e:
+        logging.error(f"Download error: {str(e)}")
+        return jsonify({'error': f"Download error: {str(e)}"}), 500
+    except yt_dlp.utils.ExtractorError as e:
+        logging.error(f"Extractor error: {str(e)}")
+        return jsonify({'error': f"Extractor error: {str(e)}"}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"Unexpected error: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred'}), 500
 
 if __name__ == '__main__':
+    # Port dynamique
     port = int(os.environ.get('PORT', 5000))  # Utilisation du port dynamique si disponible
     app.run(host='0.0.0.0', port=port, debug=False)
