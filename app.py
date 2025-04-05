@@ -9,6 +9,16 @@ logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 
+# En-têtes HTTP personnalisés pour simuler un navigateur
+DEFAULT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/90.0.4430.93 Safari/537.36'
+}
+
+# Optionnel : utilisation d'un proxy si la variable d'environnement est définie
+PROXY = os.environ.get('PROXY')  # Exemple : "http://votre-proxy:port"
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -21,11 +31,18 @@ def video_info():
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    ydl_opts = {'quiet': True, 'skip_download': True}
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'http_headers': DEFAULT_HEADERS
+    }
+    if PROXY:
+        ydl_opts['proxy'] = PROXY
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
+
             if 'formats' not in info:
                 return jsonify({'error': 'No formats available for this video.'}), 404
 
@@ -36,7 +53,7 @@ def video_info():
                 'format_note': f.get('format_note', ''),
                 'filesize': f.get('filesize') or 0
             } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
-            
+
             return jsonify({
                 'title': info['title'],
                 'thumbnail': info['thumbnail'],
@@ -68,8 +85,11 @@ def download_video():
 
     ydl_opts = {
         'format': format_id,
-        'outtmpl': output_path
+        'outtmpl': output_path,
+        'http_headers': DEFAULT_HEADERS
     }
+    if PROXY:
+        ydl_opts['proxy'] = PROXY
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
