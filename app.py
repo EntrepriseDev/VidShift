@@ -1,7 +1,6 @@
 import os
 from flask import Flask, request, send_file, jsonify, render_template
 import yt_dlp
-import os
 import uuid
 
 app = Flask(__name__)
@@ -48,8 +47,9 @@ def download_video():
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
 
+    # Utilisation d'un répertoire temporaire
     filename = f"video_{uuid.uuid4().hex}.mp4"
-    output_path = os.path.join("downloads", filename)
+    output_path = os.path.join("/tmp", filename)  # Utilisation du répertoire temporaire /tmp
 
     ydl_opts = {
         'format': format_id,
@@ -59,12 +59,10 @@ def download_video():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        return send_file(output_path, as_attachment=True)
+        return send_file(output_path, as_attachment=True)  # Envoi du fichier directement à l'utilisateur
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    os.makedirs('downloads', exist_ok=True)
-    # Utilisation du port dynamique attribué par Render
-    port = int(os.environ.get('PORT', 5000))  # Par défaut, utilise le port 5000 si PORT n'est pas défini
-    app.run(host='0.0.0.0', port=port, debug=True)
+    port = int(os.environ.get('PORT', 5000))  # Utilisation du port dynamique si disponible
+    app.run(host='0.0.0.0', port=port, debug=False)
