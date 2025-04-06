@@ -23,6 +23,15 @@ class CustomLogger:
     def error(self, msg):
         logger.error(msg)
 
+# Liste de proxies de qualité
+PROXIES = [
+    'http://proxy1:8080',
+    'http://proxy2:8080',
+    'http://proxy3:8080',
+    'http://proxy4:8080',
+    'http://proxy5:8080'
+]
+
 # Fonction pour obtenir un user-agent aléatoire (retourne une chaîne)
 def get_random_user_agent():
     user_agents = [
@@ -32,19 +41,16 @@ def get_random_user_agent():
     ]
     return random.choice(user_agents)
 
-# Fonction pour obtenir un proxy aléatoire (retourne une chaîne)
+# Fonction pour obtenir un proxy aléatoire à partir d'un pool
 def get_proxy():
-    proxies = [
-        'http://proxy1:8080',
-        'http://proxy2:8080',
-        'http://proxy3:8080',
-        'http://proxy4:8080',
-        'http://proxy5:8080'
-    ]
-    # Avec 10% de chance de choisir un proxy différent
-    if random.randint(0, 100) < 10:
-        return random.choice(proxies)
-    return proxies[0]
+    return random.choice(PROXIES)
+
+# Fonction pour obtenir des headers HTTP supplémentaires
+def get_extra_headers():
+    return {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.youtube.com/'
+    }
 
 @app.route('/')
 def index():
@@ -60,7 +66,7 @@ def video_info():
         url = data['url']
         logger.info(f"Extraction des infos pour : {url}")
 
-        # Options pour yt-dlp
+        # Options pour yt-dlp avec headers supplémentaires et gestion potentielle des cookies
         ydl_opts = {
             'quiet': True,
             'skip_download': True,
@@ -69,11 +75,19 @@ def video_info():
             'prefer_free_formats': True,
             'user_agent': get_random_user_agent(),
             'proxy': get_proxy(),
+            'http_headers': get_extra_headers(),
+            # 'cookiefile': 'cookies.txt',  # Décommenter et définir le fichier de cookies si nécessaire
             'logger': CustomLogger()
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            # Vérification si la réponse semble être du HTML (ce qui pourrait indiquer une détection bot)
+            if isinstance(info, str) and info.strip().startswith('<!DOCTYPE'):
+                snippet = info[:200]  # Log des 200 premiers caractères du HTML
+                logger.error(f"Réponse HTML inattendue reçue : {snippet}")
+                return jsonify({'error': 'Réponse HTML inattendue, possible détection bot.'}), 500
 
             # Traitement des formats vidéo
             formats = [{
@@ -84,8 +98,8 @@ def video_info():
                 'filesize': f.get('filesize') or 0
             } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
             
-            # Simulation d'un délai pour imiter un comportement humain
-            time.sleep(random.randint(1, 3))
+            # Délai aléatoire augmenté pour imiter un comportement humain (entre 3 et 6 secondes)
+            time.sleep(random.randint(3, 6))
             
             logger.info("Extraction réussie")
             return jsonify({
@@ -96,8 +110,14 @@ def video_info():
                 'formats': formats
             })
     except Exception as e:
-        logger.error(f"Erreur lors de l'extraction des infos: {e}")
-        return jsonify({'error': str(e)}), 500
+        error_message = str(e)
+        # Si l'erreur semble contenir du HTML, logguez un extrait
+        if error_message.lstrip().startswith('<!DOCTYPE'):
+            snippet = error_message[:200]
+            logger.error(f"Erreur HTML reçue : {snippet}")
+        else:
+            logger.error(f"Erreur lors de l'extraction des infos: {error_message}")
+        return jsonify({'error': error_message}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -123,12 +143,14 @@ def download_video():
             'prefer_free_formats': True,
             'user_agent': get_random_user_agent(),
             'proxy': get_proxy(),
+            'http_headers': get_extra_headers(),
+            # 'cookiefile': 'cookies.txt',  # Décommenter et définir le fichier de cookies si nécessaire
             'logger': CustomLogger()
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Délai aléatoire avant téléchargement
-            time.sleep(random.randint(2, 5))
+            # Délai aléatoire augmenté pour imiter un comportement humain (entre 5 et 10 secondes)
+            time.sleep(random.randint(5, 10))
             ydl.download([url])
             logger.info(f"Téléchargement terminé : {output_path}")
             
