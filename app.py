@@ -5,21 +5,17 @@ import uuid
 import time
 import random
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict
 import json
-import base64
 
 app = Flask(__name__)
 
 # Configuration du logging avec rotation
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-handler = logging.handlers.RotatingFileHandler(
-    'app.log', 
-    maxBytes=1000000, 
-    backupCount=1
-)
+handler = RotatingFileHandler('app.log', maxBytes=1000000, backupCount=1)
 logger.addHandler(handler)
 
 class CustomLogger:
@@ -40,7 +36,10 @@ def get_random_user_agent() -> str:
     ]
     return random.choice(user_agents)
 
-def get_proxy() -> str:
+# Rotation de proxies plus intelligente
+proxy_index = 0
+def get_rotating_proxy() -> str:
+    global proxy_index
     proxies = [
         'http://proxy1:8080',
         'http://proxy2:8080',
@@ -48,9 +47,28 @@ def get_proxy() -> str:
         'http://proxy4:8080',
         'http://proxy5:8080'
     ]
-    if random.randint(0, 100) < 10:  # Rotation des proxies
-        return random.choice(proxies)
-    return proxies[0]
+    proxy_index = (proxy_index + 1) % len(proxies)
+    logger.info(f"Utilisation du proxy : {proxies[proxy_index]}")
+    return proxies[proxy_index]
+
+def get_headers() -> Dict[str, str]:
+    return {
+        "User-Agent": get_random_user_agent(),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.youtube.com/",
+        "Connection": "keep-alive",
+        "DNT": "1"
+    }
+
+def human_delay(min_seconds=2, max_seconds=5):
+    delay = random.uniform(min_seconds, max_seconds)
+    logger.info(f"Pause simulée de {delay:.2f} secondes")
+    time.sleep(delay)
+
+def check_for_html_errors(response_text: str):
+    if response_text.strip().startswith('<!DOCTYPE'):
+        snippet = response_text[:500]
+        logger.warning(f"Réponse HTML suspecte détectée (Captcha ou erreur) :\n{snippet}")
 
 def get_download_folder() -> str:
     folder = os.path.join('downloads', datetime.now().strftime('%Y-%m-%d'))
@@ -79,8 +97,9 @@ def video_info():
             'no_call_home': True,
             'geo_bypass': True,
             'prefer_free_formats': True,
-            'user_agent': get_random_user_agent(),
-            'proxy': get_proxy(),
+            'user_agent': get_headers()["User-Agent"],
+            'proxy': get_rotating_proxy(),
+            'http_headers': get_headers(),
             'logger': CustomLogger(),
         }
 
@@ -89,7 +108,11 @@ def video_info():
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-
+            if isinstance(info, str):
+                check_for_html_errors(info)
+            
+            human_delay(2, 5)
+            
             formats = [{
                 'format_id': f.get('format_id', ''),
                 'ext': f.get('ext', ''),
@@ -97,8 +120,6 @@ def video_info():
                 'format_note': f.get('format_note', ''),
                 'filesize': f.get('filesize') or 0
             } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
-            
-            time.sleep(random.randint(1, 3))
             
             logger.info("Extraction réussie")
             return jsonify({
@@ -133,8 +154,9 @@ def download_video():
             'no_call_home': True,
             'geo_bypass': True,
             'prefer_free_formats': True,
-            'user_agent': get_random_user_agent(),
-            'proxy': get_proxy(),
+            'user_agent': get_headers()["User-Agent"],
+            'proxy': get_rotating_proxy(),
+            'http_headers': get_headers(),
             'logger': CustomLogger(),
             'restrictfilenames': True,
             'merge_output_format': 'mp4',
@@ -148,7 +170,7 @@ def download_video():
             ydl_opts['cookiefile'] = ':memory:'
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            time.sleep(random.randint(2, 5))
+            human_delay(5, 10)
             ydl.download([url])
             logger.info(f"Téléchargement terminé : {output_path}")
             
@@ -171,7 +193,6 @@ def load_cookies_from_env() -> Dict:
         return {}
     
     try:
-        # Parse le JSON
         return json.loads(cookies_env)
     except json.JSONDecodeError as e:
         logger.error(f"Erreur lors du chargement des cookies: {str(e)}")
@@ -180,9 +201,7 @@ def load_cookies_from_env() -> Dict:
 def save_cookies_to_env(cookies: Dict):
     """Sauvegarde les cookies dans la variable d'environnement"""
     try:
-        # Convertit le dictionnaire en JSON
         json_str = json.dumps(cookies)
-        # Sauvegarde dans l'environnement
         os.environ['YOUTUBE_COOKIES'] = json_str
     except Exception as e:
         logger.error(f"Erreur lors de la sauvegarde des cookies: {str(e)}")
