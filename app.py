@@ -4,30 +4,35 @@ import os
 import uuid
 import time
 import random
+import logging
 
 app = Flask(__name__)
 
-# Logger personnalisé
+# Configuration du logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Logger personnalisé pour yt-dlp
 class CustomLogger:
     def debug(self, msg):
-        pass
+        logger.debug(msg)
     
     def warning(self, msg):
-        pass
+        logger.warning(msg)
     
     def error(self, msg):
-        pass
+        logger.error(msg)
 
-# Fonction pour obtenir un user-agent aléatoire
+# Fonction pour obtenir un user-agent aléatoire (retourne une chaîne)
 def get_random_user_agent():
     user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_4) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
     ]
     return random.choice(user_agents)
 
-# Fonction pour obtenir un proxy aléatoire
+# Fonction pour obtenir un proxy aléatoire (retourne une chaîne)
 def get_proxy():
     proxies = [
         'http://proxy1:8080',
@@ -36,7 +41,7 @@ def get_proxy():
         'http://proxy4:8080',
         'http://proxy5:8080'
     ]
-    # Rotation aléatoire avec 10% de chance de changer
+    # Avec 10% de chance de choisir un proxy différent
     if random.randint(0, 100) < 10:
         return random.choice(proxies)
     return proxies[0]
@@ -48,13 +53,14 @@ def index():
 @app.route('/info', methods=['POST'])
 def video_info():
     try:
-        # Récupération des données de la requête
         data = request.get_json()
         if not data or 'url' not in data:
             return jsonify({'error': 'No URL provided'}), 400
+        
         url = data['url']
+        logger.info(f"Extraction des infos pour : {url}")
 
-        # Options de yt-dlp
+        # Options pour yt-dlp
         ydl_opts = {
             'quiet': True,
             'skip_download': True,
@@ -66,23 +72,22 @@ def video_info():
             'logger': CustomLogger()
         }
         
-        # Extraction des informations de la vidéo
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
             # Traitement des formats vidéo
             formats = [{
-                'format_id': f['format_id'],
-                'ext': f['ext'],
+                'format_id': f.get('format_id', ''),
+                'ext': f.get('ext', ''),
                 'resolution': f.get('resolution') or f.get('height', ''),
                 'format_note': f.get('format_note', ''),
                 'filesize': f.get('filesize') or 0
             } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
             
-            # Simulation d'un délai pour un comportement humain
+            # Simulation d'un délai pour imiter un comportement humain
             time.sleep(random.randint(1, 3))
             
-            # Réponse avec les informations de la vidéo et un indicateur de succès
+            logger.info("Extraction réussie")
             return jsonify({
                 'success': True,
                 'title': info.get('title', ''),
@@ -91,26 +96,25 @@ def video_info():
                 'formats': formats
             })
     except Exception as e:
-        # Gestion des erreurs
+        logger.error(f"Erreur lors de l'extraction des infos: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
     output_path = None
     try:
-        # Récupération des données de la requête
         data = request.get_json()
         if not data or 'url' not in data or 'format_id' not in data:
             return jsonify({'error': 'Missing URL or format_id'}), 400
 
         url = data['url']
         format_id = data['format_id']
+        logger.info(f"Téléchargement de la vidéo : {url} en format {format_id}")
 
-        # Création du nom de fichier et du chemin de téléchargement
+        # Création d'un nom de fichier unique
         filename = f"video_{uuid.uuid4().hex}.mp4"
         output_path = os.path.join("downloads", filename)
 
-        # Options de yt-dlp pour télécharger la vidéo
         ydl_opts = {
             'format': format_id,
             'outtmpl': output_path,
@@ -122,22 +126,26 @@ def download_video():
             'logger': CustomLogger()
         }
 
-        # Téléchargement de la vidéo
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            time.sleep(random.randint(2, 5))  # Ajout d'un délai avant le téléchargement
+            # Délai aléatoire avant téléchargement
+            time.sleep(random.randint(2, 5))
             ydl.download([url])
+            logger.info(f"Téléchargement terminé : {output_path}")
             
-            # Envoi du fichier téléchargé
             return send_file(output_path, as_attachment=True)
     
     except Exception as e:
+        logger.error(f"Erreur lors du téléchargement: {e}")
         return jsonify({'error': str(e)}), 500
 
     finally:
-        # Nettoyage après téléchargement (suppression du fichier téléchargé)
         if output_path and os.path.exists(output_path):
-            os.remove(output_path)
+            try:
+                os.remove(output_path)
+                logger.info(f"Fichier supprimé : {output_path}")
+            except Exception as remove_error:
+                logger.error(f"Erreur lors de la suppression du fichier {output_path}: {remove_error}")
 
 if __name__ == '__main__':
-    os.makedirs('downloads', exist_ok=True)  # Création du dossier pour les téléchargements
+    os.makedirs('downloads', exist_ok=True)
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000))
