@@ -19,18 +19,19 @@ def video_info():
         import yt_dlp
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            formats = [{
+            formats = [f for f in info.get('formats', []) if f.get('url') and (f.get('vcodec') != 'none' or f.get('acodec') != 'none')]
+            clean_formats = [{
                 'format_id': f['format_id'],
                 'ext': f['ext'],
                 'resolution': f.get('resolution') or f.get('height', ''),
                 'format_note': f.get('format_note', ''),
                 'filesize': f.get('filesize') or 0
-            } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
+            } for f in formats]
             return jsonify({
                 'title': info['title'],
                 'thumbnail': info['thumbnail'],
                 'duration': info['duration'],
-                'formats': formats
+                'formats': clean_formats
             })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -43,8 +44,13 @@ def download_video():
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
 
-    # Construction de la commande pour yt-dlp avec sortie vers stdout
-    cmd = ['yt-dlp', '-f', format_id, '-o', '-', url]
+    cmd = [
+        'yt-dlp',
+        '-f', format_id,
+        '-o', '-',  # Send to stdout
+        url
+    ]
+
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def generate():
@@ -58,7 +64,6 @@ def download_video():
             process.stdout.close()
             process.wait()
 
-    # On renvoie le flux en streaming sans écrire sur le disque
     return Response(generate(),
                     mimetype='video/mp4',
                     headers={"Content-Disposition": "attachment; filename=video.mp4"})
