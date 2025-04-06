@@ -1,80 +1,79 @@
-from flask import Flask, request, jsonify, send_file, render_template, after_this_request
+from flask import Flask, request, send_file, jsonify, render_template, after_this_request
+import yt_dlp
 import os
-import logging
-import tempfile
-from pytube import YouTube
+import uuid
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+
+# Configurer le chemin des cookies
+COOKIES_PATH = "cookies.txt"
 
 @app.route('/')
 def index():
-    """Affiche la page d'accueil."""
     return render_template('index.html')
 
 @app.route('/info', methods=['POST'])
 def video_info():
     """
-    Extrait les informations de la vidéo avec pytube.
-    Retourne le titre, la miniature, la durée et une liste de formats disponibles.
+    Récupère les informations de la vidéo YouTube à partir de l'URL fournie.
     """
-    data = request.get_json()
+    data = request.json
     url = data.get('url')
+
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'cookies': COOKIES_PATH  # Spécifier les cookies pour éviter le blocage
+    }
+    
     try:
-        yt = YouTube(url)
-        # Récupère les flux progressifs en mp4 (audio+vidéo) par ordre décroissant de résolution
-        streams = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc()
-        formats = [{
-            'itag': stream.itag,
-            'resolution': stream.resolution,
-            'mime_type': stream.mime_type,
-            'filesize': stream.filesize,
-            'url': stream.url  # URL directe pour le streaming (optionnel)
-        } for stream in streams]
-
-        return jsonify({
-            'title': yt.title,
-            'thumbnail': yt.thumbnail_url,
-            'duration': yt.length,
-            'formats': formats
-        })
-
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formats = [{
+                'format_id': f['format_id'],
+                'ext': f['ext'],
+                'resolution': f.get('resolution') or f.get('height', ''),
+                'format_note': f.get('format_note', ''),
+                'filesize': f.get('filesize') or 0
+            } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
+            
+            return jsonify({
+                'title': info['title'],
+                'thumbnail': info['thumbnail'],
+                'duration': info['duration'],
+                'formats': formats
+            })
     except Exception as e:
-        app.logger.error("Error extracting video info: %s", e)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
     """
-    Télécharge la vidéo au format sélectionné grâce à pytube.
-    La vidéo est enregistrée dans un fichier temporaire, envoyée au client,
-    puis supprimée automatiquement après l'envoi.
+    Télécharge la vidéo YouTube en utilisant yt-dlp et l'option cookies.
     """
-    data = request.get_json()
+    data = request.json
     url = data.get('url')
-    itag = data.get('itag')  # Utilisé pour identifier le format
-    if not url or not itag:
-        return jsonify({'error': 'Missing URL or itag'}), 400
+    format_id = data.get('format_id')
+
+    if not url or not format_id:
+        return jsonify({'error': 'Missing URL or format_id'}), 400
+
+    filename = f"video_{uuid.uuid4().hex}.mp4"
+    output_path = os.path.join("downloads", filename)
+
+    ydl_opts = {
+        'format': format_id,
+        'outtmpl': output_path,
+        'cookies': COOKIES_PATH  # Utilisation des cookies pour le téléchargement
+    }
 
     try:
-        yt = YouTube(url)
-        stream = yt.streams.get_by_itag(itag)
-        if not stream:
-            return jsonify({'error': 'Stream not found for provided itag'}), 404
-
-        # Création d'un fichier temporaire pour stocker la vidéo
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-            output_path = tmp_file.name
-
-        # Télécharger la vidéo dans le fichier temporaire
-        stream.download(
-            output_path=os.path.dirname(output_path),
-            filename=os.path.basename(output_path)
-        )
-
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        
         @after_this_request
         def remove_file(response):
             try:
@@ -85,12 +84,11 @@ def download_video():
                 app.logger.error("Error removing file: %s", ex)
             return response
 
-        return send_file(output_path, as_attachment=True, download_name="video.mp4")
-
+        return send_file(output_path, as_attachment=True, download_name=filename)
     except Exception as e:
-        app.logger.error("Error downloading video: %s", e)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Créer un dossier de téléchargement temporaire
+    os.makedirs('downloads', exist_ok=True)
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
