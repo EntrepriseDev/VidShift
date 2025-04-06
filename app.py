@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify, send_file, render_template, after_this_request
-import subprocess
 import os
 import uuid
 import logging
 import yt_dlp
+import tempfile
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -29,12 +29,13 @@ def video_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = [{
-                'format_id': f.get('format_id'),
-                'ext': f.get('ext'),
-                'resolution': f.get('resolution') or f.get('height', ''),
-                'format_note': f.get('format_note', ''),
-                'filesize': f.get('filesize') or 0
-            } for f in info.get('formats', []) if f.get('url') and (f.get('vcodec') != 'none' or f.get('acodec') != 'none')]
+                'format_id': fmt.get('format_id'),
+                'ext': fmt.get('ext'),
+                'resolution': fmt.get('resolution') or fmt.get('height', ''),
+                'format_note': fmt.get('format_note', ''),
+                'filesize': fmt.get('filesize') or 0
+            } for fmt in info.get('formats', []) 
+              if fmt.get('url') and (fmt.get('vcodec') != 'none' or fmt.get('acodec') != 'none')]
             return jsonify({
                 'title': info.get('title', 'Unknown Title'),
                 'thumbnail': info.get('thumbnail', ''),
@@ -54,23 +55,22 @@ def download_video():
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
 
-    filename = f"video_{uuid.uuid4().hex}.mp4"
-    output_path = os.path.join('/tmp', filename)
+    # Création d'un fichier temporaire sécurisé pour le téléchargement
+    temp_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    output_path = temp_file.name
+    temp_file.close()  # Le fichier sera géré manuellement après l'envoi
 
-    cmd = [
-        'yt-dlp',
-        '--cookies', 'cookies.txt',
-        '-f', format_id,
-        '-o', output_path,
-        url
-    ]
+    ydl_opts = {
+        'format': format_id,
+        'outtmpl': output_path,
+        'cookies': 'cookies.txt',
+        'quiet': True,
+        'no_warnings': True,
+    }
 
     try:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        if process.returncode != 0:
-            app.logger.error("yt-dlp error: %s", stderr.decode('utf-8'))
-            return jsonify({'error': stderr.decode('utf-8')}), 500
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
     except Exception as e:
         app.logger.error("Error downloading video: %s", e)
         return jsonify({'error': str(e)}), 500
@@ -89,9 +89,7 @@ def download_video():
         return response
 
     try:
-        return send_file(output_path,
-                         as_attachment=True,
-                         download_name="video.mp4")
+        return send_file(output_path, as_attachment=True, download_name="video.mp4")
     except Exception as e:
         app.logger.error("Error sending file: %s", e)
         return jsonify({'error': str(e)}), 500
