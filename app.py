@@ -4,6 +4,7 @@ import os
 import uuid
 import time
 from random import randint
+import random
 
 app = Flask(__name__)
 
@@ -113,8 +114,10 @@ def download_video():
             
             # Nettoyage après téléchargement
             return send_file(output_path, as_attachment=True)
+    except yt_dlp.utils.DownloadError as de:
+        return jsonify({'error': f"Download error: {de}"}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f"Unexpected error: {str(e)}"}), 500
     finally:
         # Suppression du fichier après l'envoi
         if os.path.exists(output_path):
