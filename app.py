@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, send_file, render_template, after_this_request
-import yt_dlp
+import subprocess
 import os
 import uuid
 import logging
@@ -7,49 +7,38 @@ import logging
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Définissez un User-Agent "classique" pour imiter un navigateur moderne
-CUSTOM_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                     "Chrome/114.0.0.0 Safari/537.36")
-
 @app.route('/')
 def index():
-    # Assurez-vous d'avoir un fichier index.html dans le dossier "templates"
     return render_template('index.html')
 
 @app.route('/info', methods=['POST'])
 def video_info():
     data = request.get_json()
-    url = data.get('url') if data else None
+    url = data.get('url')
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    # Ajout du user agent dans les options
     ydl_opts = {
         'quiet': True,
         'skip_download': True,
-        'user_agent': CUSTOM_USER_AGENT
+        'cookies': 'cookies.txt'  # Optionnel : certains extracteurs peuvent utiliser le fichier de cookies
     }
     try:
+        import yt_dlp
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            formats = [
-                f for f in info.get('formats', [])
-                if f.get('url') and (f.get('vcodec') != 'none' or f.get('acodec') != 'none')
-            ]
-            clean_formats = [{
+            formats = [{
                 'format_id': f.get('format_id'),
                 'ext': f.get('ext'),
                 'resolution': f.get('resolution') or f.get('height', ''),
                 'format_note': f.get('format_note', ''),
                 'filesize': f.get('filesize') or 0
-            } for f in formats]
-
+            } for f in info.get('formats', []) if f.get('url') and (f.get('vcodec') != 'none' or f.get('acodec') != 'none')]
             return jsonify({
                 'title': info.get('title', 'Unknown Title'),
                 'thumbnail': info.get('thumbnail', ''),
                 'duration': info.get('duration', 0),
-                'formats': clean_formats
+                'formats': formats
             })
     except Exception as e:
         app.logger.error("Error extracting video info: %s", e)
@@ -58,35 +47,35 @@ def video_info():
 @app.route('/download', methods=['POST'])
 def download_video():
     data = request.get_json()
-    url = data.get('url') if data else None
-    format_id = data.get('format_id') if data else None
-
+    url = data.get('url')
+    format_id = data.get('format_id')
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
 
-    # Création d'un nom de fichier temporaire dans /tmp
     filename = f"video_{uuid.uuid4().hex}.mp4"
     output_path = os.path.join('/tmp', filename)
 
-    ydl_opts = {
-        'format': format_id,
-        'outtmpl': output_path,
-        'quiet': True,
-        'user_agent': CUSTOM_USER_AGENT
-    }
-
+    # Intégration du fichier de cookies dans la commande
+    cmd = [
+        'yt-dlp',
+        '--cookies', 'cookies.txt',  # Assurez-vous que le chemin est correct
+        '-f', format_id,
+        '-o', output_path,
+        url
+    ]
+    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            app.logger.error("yt-dlp error: %s", stderr.decode('utf-8'))
+            return jsonify({'error': stderr.decode('utf-8')}), 500
     except Exception as e:
         app.logger.error("Error downloading video: %s", e)
-        if os.path.exists(output_path):
-            os.remove(output_path)
         return jsonify({'error': str(e)}), 500
 
     if not os.path.exists(output_path):
-        app.logger.error("File not found after download.")
-        return jsonify({'error': 'Failed to download video'}), 500
+        return jsonify({'error': 'File not found after download'}), 500
 
     @after_this_request
     def remove_file(response):
