@@ -2,46 +2,51 @@ from flask import Flask, request, send_file, jsonify, render_template, after_thi
 import yt_dlp
 import os
 import uuid
-import subprocess
-import platform
+import tempfile
 
 app = Flask(__name__)
 
-# Configurer le chemin des cookies
-COOKIES_PATH = "cookies.txt"
+# Cookies déjà exportés à intégrer directement dans le code
+# Assurez-vous que ce fichier existe avant de déployer sur Render
+COOKIES_PATH = os.environ.get("COOKIES_PATH", "cookies.txt")
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/export-cookies', methods=['GET'])
-def export_cookies_page():
-    return render_template('export_cookies.html')
+@app.route('/status', methods=['GET'])
+def cookie_status():
+    """Vérifie si les cookies sont disponibles"""
+    if os.path.exists(COOKIES_PATH):
+        with open(COOKIES_PATH, 'r') as f:
+            cookie_content = f.read()
+            cookie_lines = len(cookie_content.splitlines())
+        return jsonify({
+            'status': 'ok',
+            'message': f'Cookies disponibles ({cookie_lines} entrées)',
+            'cookies_found': True
+        })
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'Aucun fichier de cookies trouvé',
+            'cookies_found': False
+        })
 
-@app.route('/export-cookies', methods=['POST'])
-def export_cookies():
-    """
-    Crée un fichier de cookies à partir du navigateur spécifié
-    """
-    data = request.json
-    browser = data.get('browser', 'chrome')
+@app.route('/upload-cookies', methods=['POST'])
+def upload_cookies():
+    """Permet de télécharger un fichier cookies"""
+    if 'cookies' not in request.files:
+        return jsonify({'error': 'Aucun fichier fourni'}), 400
     
-    try:
-        # Utiliser yt-dlp pour exporter les cookies
-        subprocess.run([
-            'yt-dlp',
-            '--cookies-from-browser', 
-            browser, 
-            '--cookies', 
-            COOKIES_PATH,
-            '-o', 
-            'NUL',  # Sur Windows
-            'https://www.youtube.com'  # URL factice pour déclencher l'export
-        ], check=True)
-        
-        return jsonify({'success': True, 'message': f'Cookies exportés depuis {browser} avec succès!'})
-    except subprocess.CalledProcessError as e:
-        return jsonify({'error': f'Erreur lors de l\'export des cookies: {str(e)}'}), 500
+    file = request.files['cookies']
+    if file.filename == '':
+        return jsonify({'error': 'Aucun fichier sélectionné'}), 400
+    
+    # Sauvegarder le fichier cookies
+    file.save(COOKIES_PATH)
+    
+    return jsonify({'success': True, 'message': 'Cookies importés avec succès'})
 
 @app.route('/info', methods=['POST'])
 def video_info():
@@ -90,14 +95,15 @@ def download_video():
     data = request.json
     url = data.get('url')
     format_id = data.get('format_id')
+    
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
     
-    # S'assurer que le dossier downloads existe
-    os.makedirs('downloads', exist_ok=True)
-    
+    # Créer un dossier temporaire pour les téléchargements
+    # Utiliser le système de fichiers temporaires pour Render
+    temp_dir = tempfile.mkdtemp()
     filename = f"video_{uuid.uuid4().hex}.mp4"
-    output_path = os.path.join("downloads", filename)
+    output_path = os.path.join(temp_dir, filename)
     
     ydl_opts = {
         'format': format_id,
@@ -126,7 +132,9 @@ def download_video():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/cookies-help')
+def cookies_help():
+    return render_template('cookies_help.html')
+
 if __name__ == '__main__':
-    # Créer un dossier de téléchargement temporaire
-    os.makedirs('downloads', exist_ok=True)
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
