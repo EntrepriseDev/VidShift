@@ -25,17 +25,16 @@ def video_info():
 
     try:
         yt = YouTube(url)
-        # On récupère uniquement les flux progressifs en mp4 (audio+vidéo)
+        # Récupère les flux progressifs en mp4 (audio+vidéo) par ordre décroissant de résolution
         streams = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc()
-        formats = []
-        for stream in streams:
-            formats.append({
-                'itag': stream.itag,
-                'resolution': stream.resolution,
-                'mime_type': stream.mime_type,
-                'filesize': stream.filesize,
-                'url': stream.url  # URL direct pour le streaming (optionnel)
-            })
+        formats = [{
+            'itag': stream.itag,
+            'resolution': stream.resolution,
+            'mime_type': stream.mime_type,
+            'filesize': stream.filesize,
+            'url': stream.url  # URL directe pour le streaming (optionnel)
+        } for stream in streams]
+
         return jsonify({
             'title': yt.title,
             'thumbnail': yt.thumbnail_url,
@@ -51,11 +50,12 @@ def video_info():
 def download_video():
     """
     Télécharge la vidéo au format sélectionné grâce à pytube.
-    La vidéo est enregistrée dans un fichier temporaire, envoyée au client, puis supprimée.
+    La vidéo est enregistrée dans un fichier temporaire, envoyée au client,
+    puis supprimée automatiquement après l'envoi.
     """
     data = request.get_json()
     url = data.get('url')
-    itag = data.get('itag')  # on utilise l'itag pour identifier le format
+    itag = data.get('itag')  # Utilisé pour identifier le format
     if not url or not itag:
         return jsonify({'error': 'Missing URL or itag'}), 400
 
@@ -65,12 +65,15 @@ def download_video():
         if not stream:
             return jsonify({'error': 'Stream not found for provided itag'}), 404
 
-        # Création d'un fichier temporaire
+        # Création d'un fichier temporaire pour stocker la vidéo
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
             output_path = tmp_file.name
 
-        # pytube télécharge le fichier dans le dossier temporaire
-        stream.download(output_path=os.path.dirname(output_path), filename=os.path.basename(output_path))
+        # Télécharger la vidéo dans le fichier temporaire
+        stream.download(
+            output_path=os.path.dirname(output_path),
+            filename=os.path.basename(output_path)
+        )
 
         @after_this_request
         def remove_file(response):
