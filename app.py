@@ -1,8 +1,9 @@
+from flask import Flask, request, jsonify, send_file, render_template, after_this_request
+import subprocess
 import os
 import uuid
 import logging
-import subprocess
-from flask import Flask, request, jsonify, send_file, render_template, after_this_request
+import yt_dlp
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -11,7 +12,6 @@ logging.basicConfig(level=logging.INFO)
 def index():
     return render_template('index.html')
 
-
 @app.route('/info', methods=['POST'])
 def video_info():
     data = request.get_json()
@@ -19,14 +19,13 @@ def video_info():
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    try:
-        import yt_dlp
-        ydl_opts = {
-            'quiet': True,
-            'skip_download': True,
-            'cookiesfrombrowser': ('chrome',),  # Utilise Chrome
-        }
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'cookies': 'cookies.txt'
+    }
 
+    try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = [{
@@ -36,7 +35,6 @@ def video_info():
                 'format_note': f.get('format_note', ''),
                 'filesize': f.get('filesize') or 0
             } for f in info.get('formats', []) if f.get('url') and (f.get('vcodec') != 'none' or f.get('acodec') != 'none')]
-
             return jsonify({
                 'title': info.get('title', 'Unknown Title'),
                 'thumbnail': info.get('thumbnail', ''),
@@ -46,7 +44,6 @@ def video_info():
     except Exception as e:
         app.logger.error("Error extracting video info: %s", e)
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -62,7 +59,7 @@ def download_video():
 
     cmd = [
         'yt-dlp',
-        '--cookies-from-browser', 'chrome',  # Change to 'firefox' if needed
+        '--cookies', 'cookies.txt',
         '-f', format_id,
         '-o', output_path,
         url
@@ -75,25 +72,30 @@ def download_video():
             app.logger.error("yt-dlp error: %s", stderr.decode('utf-8'))
             return jsonify({'error': stderr.decode('utf-8')}), 500
     except Exception as e:
-        app.logger.error("Download error: %s", e)
+        app.logger.error("Error downloading video: %s", e)
         return jsonify({'error': str(e)}), 500
 
     if not os.path.exists(output_path):
-        return jsonify({'error': 'Download failed. File not found.'}), 500
+        return jsonify({'error': 'File not found after download'}), 500
 
     @after_this_request
-    def cleanup(response):
+    def remove_file(response):
         try:
             if os.path.exists(output_path):
                 os.remove(output_path)
-                app.logger.info("Temporary file removed: %s", output_path)
+                app.logger.info("Temporary file %s removed.", output_path)
         except Exception as e:
-            app.logger.warning("Cleanup error: %s", e)
+            app.logger.error("Error removing file: %s", e)
         return response
 
-    return send_file(output_path, as_attachment=True, download_name="video.mp4")
-
+    try:
+        return send_file(output_path,
+                         as_attachment=True,
+                         download_name="video.mp4")
+    except Exception as e:
+        app.logger.error("Error sending file: %s", e)
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
