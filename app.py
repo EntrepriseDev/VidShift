@@ -7,6 +7,11 @@ import logging
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# Définissez un User-Agent "classique" pour imiter un navigateur moderne
+CUSTOM_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                     "AppleWebKit/537.36 (KHTML, like Gecko) "
+                     "Chrome/114.0.0.0 Safari/537.36")
+
 @app.route('/')
 def index():
     # Assurez-vous d'avoir un fichier index.html dans le dossier "templates"
@@ -19,7 +24,12 @@ def video_info():
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    ydl_opts = {'quiet': True, 'skip_download': True}
+    # Ajout du user agent dans les options
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'user_agent': CUSTOM_USER_AGENT
+    }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -61,7 +71,8 @@ def download_video():
     ydl_opts = {
         'format': format_id,
         'outtmpl': output_path,
-        'quiet': True
+        'quiet': True,
+        'user_agent': CUSTOM_USER_AGENT
     }
 
     try:
