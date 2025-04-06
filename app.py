@@ -5,35 +5,34 @@ import uuid
 import time
 import random
 import logging
+from datetime import datetime
+from typing import Dict, List, Optional
+import json
+import base64
 
 app = Flask(__name__)
 
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
+# Configuration du logging avec rotation
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.handlers.RotatingFileHandler(
+    'app.log', 
+    maxBytes=1000000, 
+    backupCount=1
+)
+logger.addHandler(handler)
 
-# Logger personnalisé pour yt-dlp
 class CustomLogger:
     def debug(self, msg):
-        logger.debug(msg)
+        logger.debug(f"DEBUG: {msg}")
     
     def warning(self, msg):
-        logger.warning(msg)
+        logger.warning(f"WARNING: {msg}")
     
     def error(self, msg):
-        logger.error(msg)
+        logger.error(f"ERROR: {msg}")
 
-# Liste de proxies de qualité
-PROXIES = [
-    'http://proxy1:8080',
-    'http://proxy2:8080',
-    'http://proxy3:8080',
-    'http://proxy4:8080',
-    'http://proxy5:8080'
-]
-
-# Fonction pour obtenir un user-agent aléatoire (retourne une chaîne)
-def get_random_user_agent():
+def get_random_user_agent() -> str:
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_4) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36',
@@ -41,16 +40,22 @@ def get_random_user_agent():
     ]
     return random.choice(user_agents)
 
-# Fonction pour obtenir un proxy aléatoire à partir d'un pool
-def get_proxy():
-    return random.choice(PROXIES)
+def get_proxy() -> str:
+    proxies = [
+        'http://proxy1:8080',
+        'http://proxy2:8080',
+        'http://proxy3:8080',
+        'http://proxy4:8080',
+        'http://proxy5:8080'
+    ]
+    if random.randint(0, 100) < 10:  # Rotation des proxies
+        return random.choice(proxies)
+    return proxies[0]
 
-# Fonction pour obtenir des headers HTTP supplémentaires
-def get_extra_headers():
-    return {
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.youtube.com/'
-    }
+def get_download_folder() -> str:
+    folder = os.path.join('downloads', datetime.now().strftime('%Y-%m-%d'))
+    os.makedirs(folder, exist_ok=True)
+    return folder
 
 @app.route('/')
 def index():
@@ -62,11 +67,12 @@ def video_info():
         data = request.get_json()
         if not data or 'url' not in data:
             return jsonify({'error': 'No URL provided'}), 400
-        
+
         url = data['url']
         logger.info(f"Extraction des infos pour : {url}")
 
-        # Options pour yt-dlp avec headers supplémentaires et gestion potentielle des cookies
+        cookies = load_cookies_from_env()
+
         ydl_opts = {
             'quiet': True,
             'skip_download': True,
@@ -75,21 +81,15 @@ def video_info():
             'prefer_free_formats': True,
             'user_agent': get_random_user_agent(),
             'proxy': get_proxy(),
-            'http_headers': get_extra_headers(),
-            # 'cookiefile': 'cookies.txt',  # Décommenter et définir le fichier de cookies si nécessaire
-            'logger': CustomLogger()
+            'logger': CustomLogger(),
         }
+
+        if cookies:
+            ydl_opts['cookiefile'] = ':memory:'
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
-            # Vérification si la réponse semble être du HTML (ce qui pourrait indiquer une détection bot)
-            if isinstance(info, str) and info.strip().startswith('<!DOCTYPE'):
-                snippet = info[:200]  # Log des 200 premiers caractères du HTML
-                logger.error(f"Réponse HTML inattendue reçue : {snippet}")
-                return jsonify({'error': 'Réponse HTML inattendue, possible détection bot.'}), 500
 
-            # Traitement des formats vidéo
             formats = [{
                 'format_id': f.get('format_id', ''),
                 'ext': f.get('ext', ''),
@@ -98,8 +98,7 @@ def video_info():
                 'filesize': f.get('filesize') or 0
             } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
             
-            # Délai aléatoire augmenté pour imiter un comportement humain (entre 3 et 6 secondes)
-            time.sleep(random.randint(3, 6))
+            time.sleep(random.randint(1, 3))
             
             logger.info("Extraction réussie")
             return jsonify({
@@ -110,14 +109,8 @@ def video_info():
                 'formats': formats
             })
     except Exception as e:
-        error_message = str(e)
-        # Si l'erreur semble contenir du HTML, logguez un extrait
-        if error_message.lstrip().startswith('<!DOCTYPE'):
-            snippet = error_message[:200]
-            logger.error(f"Erreur HTML reçue : {snippet}")
-        else:
-            logger.error(f"Erreur lors de l'extraction des infos: {error_message}")
-        return jsonify({'error': error_message}), 500
+        logger.error(f"Erreur lors de l'extraction des infos: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -131,9 +124,8 @@ def download_video():
         format_id = data['format_id']
         logger.info(f"Téléchargement de la vidéo : {url} en format {format_id}")
 
-        # Création d'un nom de fichier unique
         filename = f"video_{uuid.uuid4().hex}.mp4"
-        output_path = os.path.join("downloads", filename)
+        output_path = os.path.join(get_download_folder(), filename)
 
         ydl_opts = {
             'format': format_id,
@@ -143,23 +135,27 @@ def download_video():
             'prefer_free_formats': True,
             'user_agent': get_random_user_agent(),
             'proxy': get_proxy(),
-            'http_headers': get_extra_headers(),
-            # 'cookiefile': 'cookies.txt',  # Décommenter et définir le fichier de cookies si nécessaire
-            'logger': CustomLogger()
+            'logger': CustomLogger(),
+            'restrictfilenames': True,
+            'merge_output_format': 'mp4',
+            'write_description': True,
+            'write_info_json': True,
+            'write_thumbnail': True
         }
 
+        cookies = load_cookies_from_env()
+        if cookies:
+            ydl_opts['cookiefile'] = ':memory:'
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Délai aléatoire augmenté pour imiter un comportement humain (entre 5 et 10 secondes)
-            time.sleep(random.randint(5, 10))
+            time.sleep(random.randint(2, 5))
             ydl.download([url])
             logger.info(f"Téléchargement terminé : {output_path}")
             
             return send_file(output_path, as_attachment=True)
-    
     except Exception as e:
         logger.error(f"Erreur lors du téléchargement: {e}")
         return jsonify({'error': str(e)}), 500
-
     finally:
         if output_path and os.path.exists(output_path):
             try:
@@ -167,6 +163,29 @@ def download_video():
                 logger.info(f"Fichier supprimé : {output_path}")
             except Exception as remove_error:
                 logger.error(f"Erreur lors de la suppression du fichier {output_path}: {remove_error}")
+
+def load_cookies_from_env() -> Dict:
+    """Charge les cookies depuis la variable d'environnement"""
+    cookies_env = os.getenv('YOUTUBE_COOKIES')
+    if not cookies_env:
+        return {}
+    
+    try:
+        # Parse le JSON
+        return json.loads(cookies_env)
+    except json.JSONDecodeError as e:
+        logger.error(f"Erreur lors du chargement des cookies: {str(e)}")
+        return {}
+
+def save_cookies_to_env(cookies: Dict):
+    """Sauvegarde les cookies dans la variable d'environnement"""
+    try:
+        # Convertit le dictionnaire en JSON
+        json_str = json.dumps(cookies)
+        # Sauvegarde dans l'environnement
+        os.environ['YOUTUBE_COOKIES'] = json_str
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde des cookies: {str(e)}")
 
 if __name__ == '__main__':
     os.makedirs('downloads', exist_ok=True)
