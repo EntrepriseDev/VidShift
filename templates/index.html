@@ -1,455 +1,398 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <title>Convertisseur VidShift- MP4, MP3, WAV, etc.</title>
-  <meta name="description" content="Téléchargez et convertissez vos vidéos YouTube en MP4, MP3, WAV, etc. avec une interface futuriste aux couleurs de YouTube, noir et blanc.">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- Bootstrap 5 -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- FontAwesome pour les icônes -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-  <!-- AOS : Animate On Scroll -->
-  <link href="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css" rel="stylesheet">
-  <style>
-    /* Variables de couleurs : rouge YouTube, blanc et noir */
-    :root {
-      --primary-color: #FF0000;  /* Rouge YouTube */
-      --secondary-color: #ffffff; /* Blanc */
-      --accent-color: #000000;    /* Noir */
-    }
-    body {
-      background: var(--secondary-color);
-      color: var(--accent-color);
-      min-height: 100vh;
-      padding: 20px;
-      overflow-x: hidden;
-      font-family: 'Roboto', sans-serif;
-      margin: 0;
-    }
-    /* Écran de chargement avec logo */
-    #loadingScreen {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: var(--accent-color);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-      transition: opacity 0.5s ease, visibility 0.5s ease;
-    }
-    #loadingScreen.hidden {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-    .loading-logo {
-      max-width: 200px;
-      margin-bottom: 20px;
-    }
-    /* Topbar avec traducteur Google */
-    .topbar {
-      background: var(--accent-color);
-      color: var(--secondary-color);
-      padding: 8px 20px;
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-    }
-    /* On cache le branding de Google Translate */
-    .goog-te-banner-frame.skiptranslate,
-    .goog-logo-link,
-    .goog-te-gadget span {
-      display: none !important;
-    }
-    .goog-te-gadget {
-      color: transparent !important;
-    }
-    #google_translate_element {
-      color: var(--secondary-color);
-    }
-    header, footer {
-      text-align: center;
-      padding: 10px 0;
-    }
-    header h1, footer h4, footer p {
-      color: var(--primary-color);
-    }
-    /* Conteneur principal avec effet glassmorphism */
-    .glass-container {
-      background: rgba(255, 255, 255, 0.9);
-      border: 2px solid var(--primary-color);
-      border-radius: 20px;
-      padding: 40px;
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
-      max-width: 900px;
-      margin: 20px auto;
-    }
-    h1, h2, h3 {
-      text-shadow: 1px 1px 3px rgba(0,0,0,0.2);
-      font-weight: 700;
-    }
-    .lead {
-      font-size: 1.2rem;
-      color: #555;
-    }
-    /* Style des inputs et boutons */
-    #urlInput, #txt-url {
-      border-radius: 50px;
-      padding: 15px;
-      font-size: 1.1rem;
-      border: 2px solid var(--primary-color);
-      outline: none;
-    }
-    button {
-      border-radius: 50px;
-      transition: transform 0.3s ease, box-shadow 0.3s ease;
-      background-color: var(--primary-color);
-      color: var(--secondary-color);
-      border: none;
-    }
-    button:hover {
-      transform: scale(1.05);
-      box-shadow: 0 6px 12px rgba(0,0,0,0.3);
-    }
-    /* Animation d'apparition */
-    #videoDetails, .section-content {
-      animation: fadeIn 0.8s ease-in-out;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(-20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    /* Thumbnails */
-    .thumbnail {
-      width: 100%;
-      max-width: 400px;
-      border-radius: 15px;
-      margin: 20px auto;
-      box-shadow: 0 6px 14px rgba(0,0,0,0.2);
-      transition: transform 0.3s ease;
-    }
-    .thumbnail:hover {
-      transform: scale(1.1);
-    }
-    /* Sélecteur de format */
-    #formatSelect {
-      padding: 10px;
-      font-size: 1.1rem;
-      border-radius: 50px;
-      background: var(--secondary-color);
-      color: var(--accent-color);
-      border: 2px solid var(--primary-color);
-      transition: background 0.3s ease;
-    }
-    #formatSelect:focus {
-      background: #f2f2f2;
-    }
-    /* Barre de chargement de conversion */
-    #loadingBarContainer {
-      margin-top: 20px;
-      display: none;
-    }
-    /* Sections info, étapes et À propos */
-    .info-section, .steps-section, .about-section {
-      margin-top: 40px;
-    }
-    .info-section ul, .steps-section ul {
-      list-style: none;
-      padding: 0;
-    }
-    .info-section li, .steps-section li {
-      margin-bottom: 20px;
-      padding-left: 40px;
-      position: relative;
-    }
-    .info-section li::before, .steps-section li::before {
-      content: "\f058";
-      font-family: "Font Awesome 6 Free";
-      font-weight: 900;
-      position: absolute;
-      left: 0;
-      top: 0;
-      color: var(--primary-color);
-    }
-    .steps-section li span.number {
-      background: var(--primary-color);
-      color: var(--secondary-color);
-      border-radius: 50%;
-      display: inline-block;
-      width: 30px;
-      height: 30px;
-      text-align: center;
-      line-height: 30px;
-      margin-right: 10px;
-      font-weight: bold;
-    }
-    /* Section À propos */
-    .about-section img {
-      max-width: 100%;
-      border-radius: 10px;
-      margin-bottom: 15px;
-    }
-    .about-section p {
-      line-height: 1.6;
-    }
-    /* Footer */
-    footer {
-      background: var(--accent-color);
-      padding: 40px 0;
-      color: #ccc;
-    }
-    footer a {
-      color: #ccc;
-      text-decoration: none;
-    }
-    footer a:hover {
-      color: var(--primary-color);
-    }
-    /* Responsive */
-    @media (max-width: 576px) {
-      h1 { font-size: 1.8rem; }
-      .glass-container { padding: 20px; }
-      .btn-success{
-        width: 98%;
-      }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input[type="text"], select {
+            width: 100%;
+            padding: 8px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px 0;
+        }
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .video-info {
+            display: flex;
+            margin-bottom: 15px;
+        }
+        .thumbnail {
+            width: 120px;
+            height: 90px;
+            object-fit: cover;
+            margin-right: 15px;
+        }
+        .formats {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .formats th, .formats td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .formats tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .formats th {
+            background-color: #4285f4;
+            color: white;
+        }
+        .message {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .hidden {
+            display: none;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 15px;
+        }
+        .tab {
+            padding: 10px 15px;
+            background-color: #e9e9e9;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+            margin-right: 5px;
+        }
+        .tab.active {
+            background-color: #4285f4;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
 </head>
 <body>
-  <!-- Écran de chargement avec logo -->
-  <div id="loadingScreen">
-    <!-- Remplace cette URL par le logo de ton site -->
-    <img src="https://via.placeholder.com/200x100.png?text=Logo" alt="Logo du site" class="loading-logo">
-    <div class="spinner-border text-primary" role="status">
-      <span class="visually-hidden">Chargement...</span>
+    <div class="container">
+        <h1>YouTube Downloader</h1>
+        
+        <div id="cookie-status" class="message warning">
+            Vérification des cookies...
+        </div>
+        
+        <div class="tabs">
+            <div class="tab active" data-tab="downloader">Téléchargeur</div>
+            <div class="tab" data-tab="cookies">Gestion des cookies</div>
+        </div>
+        
+        <div id="downloader-tab" class="tab-content active">
+            <div class="card">
+                <h2>Entrer l'URL de la vidéo</h2>
+                <input type="text" id="video-url" placeholder="https://www.youtube.com/watch?v=...">
+                <button onclick="getVideoInfo()">Obtenir les informations</button>
+            </div>
+            
+            <div id="video-details" class="card hidden">
+                <div class="video-info">
+                    <img id="video-thumbnail" class="thumbnail" src="" alt="Miniature">
+                    <div>
+                        <h3 id="video-title"></h3>
+                        <p>Durée: <span id="video-duration"></span> secondes</p>
+                    </div>
+                </div>
+                
+                <h3>Formats disponibles</h3>
+                <table class="formats">
+                    <thead>
+                        <tr>
+                            <th>Format</th>
+                            <th>Résolution</th>
+                            <th>Extension</th>
+                            <th>Taille</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="formats-list">
+                        <!-- Les formats seront ajoutés ici -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="message" class="hidden message"></div>
+        </div>
+        
+        <div id="cookies-tab" class="tab-content">
+            <div class="card">
+                <h2>Téléverser un fichier de cookies</h2>
+                <p>Pour télécharger des vidéos restreintes, vous devez fournir un fichier de cookies valide.</p>
+                
+                <form id="cookie-form" enctype="multipart/form-data">
+                    <input type="file" id="cookie-file" accept=".txt">
+                    <button type="submit">Téléverser</button>
+                </form>
+                
+                <div id="cookie-message" class="hidden message"></div>
+                
+                <p style="margin-top: 20px;">
+                    <a href="/cookies-help">Comment obtenir un fichier de cookies ?</a>
+                </p>
+            </div>
+        </div>
     </div>
-  </div>
 
-  <!-- Topbar avec traducteur Google -->
-  <div class="topbar">
-    <div id="google_translate_element"></div>
-  </div>
-
-  <!-- Header futuriste -->
-  <header data-aos="fade-down">
-    <h1><i class="fa-solid fa-download"></i> Convertisseur VidShift</h1>
-    <p class="lead">Téléchargez et convertissez vos vidéos YouTube en MP4, MP3, WAV, etc. avec style et simplicité.</p>
-  </header>
-
-  <!-- Conteneur principal pour la conversion -->
-  <div class="glass-container" data-aos="zoom-in">
-    <!-- Barre de chargement de conversion -->
-    <div id="loadingBarContainer" style="margin: 5px;">
-      <div class="progress">
-        <div id="loadingBar" class="progress-bar bg-danger progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-      </div>
-    </div>
-
-    <!-- Formulaire de conversion -->
-    <div class="input-group mb-4" data-aos="fade-up" data-aos-delay="200">
-      <input id="urlInput" type="text" class="form-control" placeholder="Collez l'URL YouTube ici" aria-label="URL YouTube">
-      <button class="btn" onclick="fetchInfo()">
-        <i class="fa-solid fa-info-circle"></i> Shift
-      </button>
-    </div>
-
-    <!-- Section d'affichage des informations vidéo -->
-    <div id="videoDetails" class="d-none" data-aos="fade-up" data-aos-delay="400">
-      <img id="thumbnail" class="thumbnail rounded" data-aos="zoom-in" data-aos-delay="600">
-      <h3 id="videoTitle" class="mt-3" data-aos="fade-right" data-aos-delay="800"></h3>
-      <div class="mt-3" data-aos="fade-left" data-aos-delay="1000">
-        <label for="formatSelect" class="form-label">Sélectionnez le format :</label>
-        <select id="formatSelect" class="form-select"></select>
-      </div>
-      <button class="btn btn-success mt-3" onclick="downloadSelected()" data-aos="flip-up" data-aos-delay="1200">
-        <i class="fa-solid fa-download"></i> Télécharger
-      </button>
-    </div>
-
-    <p id="status" class="mt-4" data-aos="fade-up" data-aos-delay="1400"></p>
-  </div>
-
-  <!-- Section Avantages du convertisseur -->
-  <section class="glass-container info-section" data-aos="fade-up">
-    <h2>Pourquoi choisir notre convertisseur ?</h2>
-    <ul>
-      <li><strong>Conversion Haute Qualité :</strong> Conservez la qualité originale de vos vidéos en 720p, 1080p, 4K ou même 8K.</li>
-      <li><strong>Compatibilité Totale :</strong> Fonctionne sur tous vos appareils : Windows, Mac, Android, iPhone, etc.</li>
-      <li><strong>Interface Intuitive :</strong> Une navigation simple et moderne pour une utilisation aisée.</li>
-      <li><strong>Rapidité et Sécurité :</strong> Téléchargement rapide et sécurisé, sans aucune publicité intrusive.</li>
-      <li><strong>Formats Multiples :</strong> Convertissez en MP4, MP3, WAV, et bien plus encore.</li>
-      <li><strong>Aucun Téléchargement Requis :</strong> Utilisez notre service en ligne, où que vous soyez.</li>
-    </ul>
-  </section>
-
-  <!-- Section Étapes de conversion -->
-  <section class="glass-container steps-section" data-aos="fade-up" data-aos-delay="200">
-    <h2>Convertir YouTube en MP4 en 3 étapes rapides</h2>
-    <ul>
-      <li><span class="number">1</span> Entrez l'URL de la vidéo YouTube ou des mots-clés dans la zone de recherche.</li>
-      <li><span class="number">2</span> Choisissez le format souhaité (MP4, MP3, etc.) et lancez la conversion.</li>
-      <li><span class="number">3</span> Patientez quelques instants, puis téléchargez votre fichier converti.</li>
-    </ul>
-  </section>
-
-  <!-- Section À propos avec détails et images -->
-  <section class="glass-container about-section" data-aos="fade-up">
-    <h2>À propos de notre convertisseur</h2>
-    <img src="https://via.placeholder.com/800x400.png?text=Image+du+convertisseur" alt="Image du convertisseur">
-    <p>Ce convertisseur VidShifta été conçu pour offrir une expérience de conversion rapide, intuitive et sécurisée. En combinant des technologies modernes avec un design épuré aux couleurs de YouTube, nous vous garantissons une interface performante et élégante.</p>
-    <p>Créé avec passion par une équipe de développeurs et d'experts en UX, ce service est mis à jour régulièrement pour répondre à vos besoins et améliorer constamment votre expérience.</p>
-  </section>
-
-  <!-- Footer enrichi avec plusieurs informations -->
-  <footer data-aos="fade-up">
-    <h4>Convertisseur VidShift</h4>
-    <p>© 2023 Convertisseur VidShift- Tous droits réservés.</p>
-    <p>Créé par Durand Dev / Ralph Developer / Modjo Victor. Pour toute question, contactez-nous via <a href="mailto:Entreprisedev02@gmail.com">youtube@D.com</a>.</p>
-    <p>Suivez-nous sur les réseaux sociaux :</p>
-    <p>
-      <a href="#" style="color: var(--primary-color); margin-right: 10px;"><i class="fa-brands fa-facebook"></i></a>
-      <a href="#" style="color: var(--primary-color); margin-right: 10px;"><i class="fa-brands fa-twitter"></i></a>
-      <a href="#" style="color: var(--primary-color);"><i class="fa-brands fa-instagram"></i></a>
-    </p>
-  </footer>
-
-  <!-- Bootstrap JS Bundle -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <!-- AOS JS -->
-  <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js"></script>
-  <!-- Google Translate Widget -->
-  <script type="text/javascript">
-    function googleTranslateElementInit() {
-      new google.translate.TranslateElement({
-        pageLanguage: 'fr',
-        includedLanguages: 'fr,en,de,es,it,pt,ru,ja,ko,zh-CN,zh-TW,nl,pl,ar,tr,hi,vi,id,fa,uk,ro,el,sv',
-        layout: google.translate.TranslateElement.InlineLayout.SIMPLE
-      }, 'google_translate_element');
-    }
-  </script>
-  <script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
-  <script>
-    // Initialisation d'AOS
-    AOS.init({
-      once: true,
-      duration: 800,
-    });
-    
-    let progressInterval;
-    
-    function startProgress() {
-      const progressBar = document.getElementById('loadingBar');
-      let width = 0;
-      progressBar.style.width = "0%";
-      progressBar.setAttribute("aria-valuenow", 0);
-      progressInterval = setInterval(() => {
-        if (width >= 90) { // Limiter à 90% jusqu'au résultat
-          clearInterval(progressInterval);
-        } else {
-          width += 10;
-          progressBar.style.width = width + "%";
-          progressBar.setAttribute("aria-valuenow", width);
+    <script>
+        // Vérifier le statut des cookies au chargement
+        window.onload = function() {
+            checkCookieStatus();
+            
+            // Configuration des onglets
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    
+                    tab.classList.add('active');
+                    document.getElementById(tab.dataset.tab + '-tab').classList.add('active');
+                });
+            });
+            
+            // Configuration du formulaire de cookies
+            document.getElementById('cookie-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                uploadCookies();
+            });
+        };
+        
+        // Vérifier si les cookies sont disponibles
+        function checkCookieStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    const statusDiv = document.getElementById('cookie-status');
+                    
+                    if (data.cookies_found) {
+                        statusDiv.className = 'message success';
+                        statusDiv.textContent = data.message;
+                    } else {
+                        statusDiv.className = 'message warning';
+                        statusDiv.textContent = 'Aucun fichier de cookies trouvé. Certaines vidéos restreintes pourraient ne pas être accessibles.';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('cookie-status').className = 'message error';
+                    document.getElementById('cookie-status').textContent = 'Erreur lors de la vérification des cookies: ' + error;
+                });
         }
-      }, 300);
-    }
-    
-    function stopProgress() {
-      clearInterval(progressInterval);
-      document.getElementById('loadingBar').style.width = "100%";
-      setTimeout(() => {
-        document.getElementById('loadingBarContainer').style.display = "none";
-      }, 500);
-    }
-    
-    // Fonction pour récupérer les informations vidéo (récupération réelle)
-    async function fetchInfo() {
-      const url = document.getElementById('urlInput').value;
-      document.getElementById('status').innerText = 'Récupération des informations...';
-      document.getElementById('loadingBarContainer').style.display = "block";
-      startProgress();
-      try {
-        const res = await fetch('/info', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ url })
-        });
-        const data = await res.json();
-        if (data.error) {
-          document.getElementById('status').innerText = data.error;
-          stopProgress();
-          return;
+        
+        // Téléverser un fichier de cookies
+        function uploadCookies() {
+            const fileInput = document.getElementById('cookie-file');
+            const messageDiv = document.getElementById('cookie-message');
+            
+            if (!fileInput.files[0]) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Veuillez sélectionner un fichier';
+                messageDiv.classList.remove('hidden');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('cookies', fileInput.files[0]);
+            
+            fetch('/upload-cookies', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = data.message;
+                    // Mettre à jour le statut des cookies
+                    checkCookieStatus();
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = data.error;
+                }
+                messageDiv.classList.remove('hidden');
+            })
+            .catch(error => {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Erreur: ' + error;
+                messageDiv.classList.remove('hidden');
+            });
         }
-        // Affichage des détails vidéo
-        document.getElementById('videoDetails').classList.remove('d-none');
-        document.getElementById('thumbnail').src = data.thumbnail;
-        document.getElementById('videoTitle').innerText = data.title;
-        const formatSelect = document.getElementById('formatSelect');
-        formatSelect.innerHTML = "";
-        data.formats.forEach(f => {
-          const sizeMB = f.filesize ? (f.filesize / (1024 * 1024)).toFixed(1) + " MB" : "N/A";
-          const optionText = `${f.ext.toUpperCase()} - ${f.resolution || 'Audio'} - ${f.format_note} (${sizeMB})`;
-          const option = new Option(optionText, f.format_id);
-          formatSelect.add(option);
-        });
-        document.getElementById('status').innerText = 'Choisissez le format désiré pour télécharger.';
-        stopProgress();
-      } catch (error) {
-        document.getElementById('status').innerText = 'Erreur : ' + error.message;
-        stopProgress();
-      }
-    }
-    
-    // Fonction pour lancer le téléchargement
-    async function downloadSelected() {
-      const url = document.getElementById('urlInput').value;
-      const format_id = document.getElementById('formatSelect').value;
-      document.getElementById('status').innerText = 'Téléchargement en cours...';
-      try {
-        const res = await fetch('/download', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ url, format_id })
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error);
+        
+        // Obtenir les informations de la vidéo
+        function getVideoInfo() {
+            const url = document.getElementById('video-url').value;
+            const messageDiv = document.getElementById('message');
+            
+            if (!url) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Veuillez entrer une URL';
+                messageDiv.classList.remove('hidden');
+                return;
+            }
+            
+            messageDiv.className = 'message';
+            messageDiv.textContent = 'Chargement des informations...';
+            messageDiv.classList.remove('hidden');
+            
+            fetch('/info', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ url: url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = 'Erreur: ' + data.error;
+                    return;
+                }
+                
+                // Afficher les détails de la vidéo
+                document.getElementById('video-title').textContent = data.title;
+                document.getElementById('video-thumbnail').src = data.thumbnail;
+                document.getElementById('video-duration').textContent = data.duration;
+                
+                // Afficher les formats disponibles
+                const formatsList = document.getElementById('formats-list');
+                formatsList.innerHTML = '';
+                
+                data.formats.forEach(format => {
+                    const row = document.createElement('tr');
+                    
+                    // Format
+                    const formatCell = document.createElement('td');
+                    formatCell.textContent = format.format_note || format.format_id;
+                    row.appendChild(formatCell);
+                    
+                    // Résolution
+                    const resolutionCell = document.createElement('td');
+                    resolutionCell.textContent = format.resolution || 'N/A';
+                    row.appendChild(resolutionCell);
+                    
+                    // Extension
+                    const extCell = document.createElement('td');
+                    extCell.textContent = format.ext;
+                    row.appendChild(extCell);
+                    
+                    // Taille
+                    const sizeCell = document.createElement('td');
+                    sizeCell.textContent = format.filesize ? (format.filesize / 1024 / 1024).toFixed(2) + ' MB' : 'N/A';
+                    row.appendChild(sizeCell);
+                    
+                    // Action
+                    const actionCell = document.createElement('td');
+                    const downloadBtn = document.createElement('button');
+                    downloadBtn.textContent = 'Télécharger';
+                    downloadBtn.onclick = function() {
+                        downloadVideo(url, format.format_id);
+                    };
+                    actionCell.appendChild(downloadBtn);
+                    row.appendChild(actionCell);
+                    
+                    formatsList.appendChild(row);
+                });
+                
+                // Afficher la section des détails
+                document.getElementById('video-details').classList.remove('hidden');
+                messageDiv.classList.add('hidden');
+            })
+            .catch(error => {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Erreur: ' + error;
+            });
         }
-        const blob = await res.blob();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = format_id.match(/mp3|wav/i) 
-          ? "audio." + (format_id.match(/wav/i) ? "wav" : "mp3") 
-          : "video.mp4";
-        a.click();
-        document.getElementById('status').innerText = '✅ Téléchargement terminé !';
-      } catch (error) {
-        document.getElementById('status').innerText = '❌ ' + error.message;
-      }
-    }
-  </script>
-  
-  <!-- Masquer l'écran de chargement lorsque la page est complètement chargée -->
-  <script>
-    window.addEventListener('load', function() {
-      const loadingScreen = document.getElementById('loadingScreen');
-      loadingScreen.classList.add('hidden');
-    });
-  </script>
-  
-  <!-- Bootstrap JS Bundle -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <!-- AOS JS -->
-  <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js"></script>
-  <script>
-    AOS.init({
-      once: true,
-      duration: 800,
-    });
-  </script>
+        
+        // Télécharger la vidéo
+        function downloadVideo(url, formatId) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = 'message';
+            messageDiv.textContent = 'Préparation du téléchargement...';
+            messageDiv.classList.remove('hidden');
+            
+            fetch('/download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ url: url, format_id: formatId })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Erreur lors du téléchargement');
+                    });
+                }
+                
+                // Créer un lien de téléchargement et cliquer dessus
+                const filename = response.headers.get('content-disposition')
+                    ? response.headers.get('content-disposition').split('filename=')[1].replace(/"/g, '')
+                    : 'video.mp4';
+                
+                return response.blob().then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Téléchargement réussi!';
+                });
+            })
+            .catch(error => {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Erreur: ' + error;
+            });
+        }
+    </script>
 </body>
 </html>
