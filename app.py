@@ -7,42 +7,58 @@ import tempfile
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-@app.route('/')
-def index():
-    """Affiche la page d'accueil."""
-    return render_template('index.html')
 
-@app.route('/info', methods=['POST'])
-def video_info():
-    """Récupère les infos de la vidéo (titre, thumbnail, durée, formats)."""
-    data = request.get_json()
-    url = data.get('url')
-    if not url:
-        return jsonify({'error': 'No URL provided'}), 400
-
+def extract_video_info(url: str) -> dict:
+    """
+    Extrait les informations de la vidéo en utilisant yt-dlp.
+    Utilise le fichier cookies.txt pour contourner les limitations de YouTube.
+    """
     ydl_opts = {
         'quiet': True,
         'skip_download': True,
         'cookies': 'cookies.txt'
     }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        return ydl.extract_info(url, download=False)
+
+
+@app.route('/')
+def index():
+    """Affiche la page d'accueil."""
+    return render_template('index.html')
+
+
+@app.route('/info', methods=['POST'])
+def video_info():
+    """
+    Récupère les informations de la vidéo (titre, miniature, durée, formats).
+    Les formats filtrés incluent uniquement ceux avec une URL et du contenu vidéo/audio.
+    """
+    data = request.get_json()
+    url = data.get('url')
+    if not url:
+        return jsonify({'error': 'No URL provided'}), 400
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = [{
+        info = extract_video_info(url)
+        formats = [
+            {
                 'format_id': fmt.get('format_id'),
                 'ext': fmt.get('ext'),
                 'resolution': fmt.get('resolution') or fmt.get('height', ''),
                 'format_note': fmt.get('format_note', ''),
-                'filesize': fmt.get('filesize') or 0
-            } for fmt in info.get('formats', []) if fmt.get('url') and (fmt.get('vcodec') != 'none' or fmt.get('acodec') != 'none')]
-
-            return jsonify({
-                'title': info.get('title', 'Unknown Title'),
-                'thumbnail': info.get('thumbnail', ''),
-                'duration': info.get('duration', 0),
-                'formats': formats
-            })
+                'filesize': fmt.get('filesize') or 0,
+                'url': fmt.get('url')
+            }
+            for fmt in info.get('formats', [])
+            if fmt.get('url') and (fmt.get('vcodec') != 'none' or fmt.get('acodec') != 'none')
+        ]
+        return jsonify({
+            'title': info.get('title', 'Unknown Title'),
+            'thumbnail': info.get('thumbnail', ''),
+            'duration': info.get('duration', 0),
+            'formats': formats
+        })
 
     except Exception as e:
         app.logger.error("Error extracting video info: %s", e)
@@ -51,22 +67,27 @@ def video_info():
 
 @app.route('/download', methods=['POST'])
 def download_video():
-    """Télécharge la vidéo choisie et l'envoie au client."""
+    """
+    Télécharge la vidéo au format sélectionné, enregistre le fichier dans un emplacement temporaire,
+    l'envoie au client en téléchargement, puis supprime le fichier du serveur.
+    """
     data = request.get_json()
     url = data.get('url')
     format_id = data.get('format_id')
-
     if not url or not format_id:
         return jsonify({'error': 'Missing URL or format_id'}), 400
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-            output_path = temp_file.name
+        # Crée un fichier temporaire pour stocker la vidéo
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
+            output_path = tmp_file.name
 
         ydl_opts = {
             'format': format_id,
             'outtmpl': output_path,
-            'cookies': 'cookies.txt'
+            'cookies': 'cookies.txt',
+            'quiet': True,
+            'no_warnings': True,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -75,9 +96,11 @@ def download_video():
         @after_this_request
         def remove_file(response):
             try:
-                os.remove(output_path)
-            except Exception as e:
-                app.logger.error("Error deleting temp file: %s", e)
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                    app.logger.info("Temporary file %s removed.", output_path)
+            except Exception as ex:
+                app.logger.error("Error removing file: %s", ex)
             return response
 
         return send_file(output_path, as_attachment=True, download_name="video.mp4")
@@ -88,4 +111,5 @@ def download_video():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)
