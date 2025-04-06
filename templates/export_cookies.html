@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exporter les cookies YouTube</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        select {
+            padding: 8px;
+            margin-right: 10px;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Exporter les cookies YouTube</h1>
+        <p>Pour télécharger des vidéos restreintes, vous devez exporter les cookies de votre navigateur.</p>
+        
+        <div>
+            <label for="browser">Choisissez votre navigateur:</label>
+            <select id="browser">
+                <option value="chrome">Chrome</option>
+                <option value="firefox">Firefox</option>
+                <option value="edge">Edge</option>
+                <option value="safari">Safari</option>
+                <option value="opera">Opera</option>
+            </select>
+            <button onclick="exportCookies()">Exporter les cookies</button>
+        </div>
+        
+        <div id="result" class="result" style="display: none;"></div>
+        
+        <div style="margin-top: 30px;">
+            <h2>Instructions:</h2>
+            <ol>
+                <li>Assurez-vous d'être connecté à YouTube dans le navigateur sélectionné</li>
+                <li>Sélectionnez votre navigateur dans la liste déroulante</li>
+                <li>Cliquez sur "Exporter les cookies"</li>
+                <li>Une fois les cookies exportés avec succès, vous pourrez télécharger des vidéos restreintes</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function exportCookies() {
+            const browser = document.getElementById('browser').value;
+            const resultDiv = document.getElementById('result');
+            
+            fetch('/export-cookies', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ browser: browser })
+            })
+            .then(response => response.json())
+            .then(data => {
+                resultDiv.style.display = 'block';
+                if (data.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = data.message;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = data.error;
+                }
+            })
+            .catch(error => {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = "Erreur: " + error.message;
+                resultDiv.style.display = 'block';
+            });
+        }
+    </script>
+</body>
+</html>
