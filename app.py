@@ -69,13 +69,14 @@ def download_video():
     filename = f"video_{uuid.uuid4().hex}.mp4"
     output_path = os.path.join('/tmp', filename)
 
-    cmd = [
-        'yt-dlp',
-        '--cookies', COOKIES_PATH,
-        '-f', format_id,
-        '-o', output_path,
-        url
-    ]
+cmd = [
+    'yt-dlp',
+    '--cookies-from-browser', 'chrome',  # ou 'firefox' selon ton navigateur
+    '-f', format_id,
+    '-o', output_path,
+    url
+]
+
 
     try:
         app.logger.info("⏳ Téléchargement en cours avec yt-dlp...")
