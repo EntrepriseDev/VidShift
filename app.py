@@ -25,19 +25,21 @@ def get_random_user_agent():
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 11_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
     ]
-    return {'User-Agent': random.choice(user_agents)}
+    return random.choice(user_agents)
 
 # Fonction pour obtenir un proxy aléatoire
 def get_proxy():
-    proxies = {
-        'http': 'http://proxy1:8080',
-        'https': 'http://proxy1:8080'
-    }
-    # Rotation des proxies toutes les heures
-    if random.randint(0, 100) < 10:  # 10% de chance de changer de proxy
-        proxies['http'] = f'http://proxy{random.randint(1, 5)}:8080'
-        proxies['https'] = f'http://proxy{random.randint(1, 5)}:8080'
-    return proxies
+    proxies = [
+        'http://proxy1:8080',
+        'http://proxy2:8080',
+        'http://proxy3:8080',
+        'http://proxy4:8080',
+        'http://proxy5:8080'
+    ]
+    # Rotation aléatoire avec 10% de chance de changer
+    if random.randint(0, 100) < 10:
+        return random.choice(proxies)
+    return proxies[0]
 
 @app.route('/')
 def index():
@@ -80,11 +82,12 @@ def video_info():
             # Simulation d'un délai pour un comportement humain
             time.sleep(random.randint(1, 3))
             
-            # Réponse avec les informations de la vidéo
+            # Réponse avec les informations de la vidéo et un indicateur de succès
             return jsonify({
-                'title': info['title'],
-                'thumbnail': info['thumbnail'],
-                'duration': info['duration'],
+                'success': True,
+                'title': info.get('title', ''),
+                'thumbnail': info.get('thumbnail', ''),
+                'duration': info.get('duration', 0),
                 'formats': formats
             })
     except Exception as e:
@@ -93,6 +96,7 @@ def video_info():
 
 @app.route('/download', methods=['POST'])
 def download_video():
+    output_path = None
     try:
         # Récupération des données de la requête
         data = request.get_json()
@@ -131,7 +135,7 @@ def download_video():
 
     finally:
         # Nettoyage après téléchargement (suppression du fichier téléchargé)
-        if os.path.exists(output_path):
+        if output_path and os.path.exists(output_path):
             os.remove(output_path)
 
 if __name__ == '__main__':
