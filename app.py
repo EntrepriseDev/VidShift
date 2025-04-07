@@ -84,10 +84,9 @@ def get_smart_proxy() -> Optional[str]:
     """Système intelligent de gestion des proxies avec vérification de disponibilité"""
     proxy_list = [
         "http://172.67.181.112:80",
-        "http://proxy2:8080",
-        "http://proxy3:8080",
-        "http://proxy4:8080", 
-        "http://proxy5:8080"
+        "http://172.67.0.16:80",
+        "http://104.20.75.222:80",
+        "http://172.67.68.124:80"
     ]
     
     # En environnement de production, remplacez par vos vrais proxies
