@@ -92,15 +92,7 @@ def get_browser_fingerprint():
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
-# Middleware de sécurité
-@app.after_request
-def add_security_headers(response):
-    response.headers.update({
-        'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'DENY',
-        'Content-Security-Policy': "default-src 'self'; img-src 'self' i.ytimg.com *.googleusercontent.com data:; script-src 'self' 'unsafe-inline';"
-    })
-    return response
+
 
 # Cache pour le rate limiting - Optimisé avec expiration automatique
 rate_limit_cache = {}
