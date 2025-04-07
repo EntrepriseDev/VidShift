@@ -28,13 +28,6 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1'
 ]
 
-# Middleware de sécurité
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' i.ytimg.com *.googleusercontent.com data: *; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';"
-    return response
 
 # Rate limiting qui simule un comportement humain
 def rate_limit(limit=5, per=60, jitter=True):
