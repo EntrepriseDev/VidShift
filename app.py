@@ -142,7 +142,7 @@ def index():
             </script>
         </body>
         </html>
-        ''', content_type='text/html')
+        ''')
 
 # Obtenir les informations de la vidéo
 @app.route('/info', methods=['POST'])
