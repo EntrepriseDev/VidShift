@@ -1,5 +1,5 @@
 Flask
-yt-dlp -U
+yt-dlp
 gunicorn
 pytube
 flask
