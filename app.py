@@ -10,299 +10,203 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import json
 import requests
-from bs4 import BeautifulSoup
-import tempfile
+from urllib.parse import urlparse
+import string
+import socket
+import hashlib
+from user_agents import parse
+from functools import lru_cache
 
 app = Flask(__name__)
 
-# Configuration du logging pour Render
+# Configuration du logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+handler = RotatingFileHandler('app.log', maxBytes=1_000_000, backupCount=3)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler = RotatingFileHandler('/tmp/app.log', maxBytes=5000000, backupCount=3)
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
 
 class CustomLogger:
     def debug(self, msg):
-        logger.debug(f"DEBUG: {msg}")
+        logger.debug(msg)
     
     def warning(self, msg):
-        logger.warning(f"WARNING: {msg}")
+        logger.warning(msg)
     
     def error(self, msg):
-        logger.error(f"ERROR: {msg}")
+        logger.error(msg)
 
-# Génération de User-Agent réalistes
-def get_random_user_agent() -> str:
-    """Génère un User-Agent réaliste et moderne"""
-    # Liste de User-Agents récents et variés
-    user_agents = [
-        # Chrome sur Windows
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.49 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.5672.63 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.90 Safari/537.36',
-        # Firefox sur Windows
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/112.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/113.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/114.0',
-        # Chrome sur Mac
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.49 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.5672.63 Safari/537.36',
-        # Safari sur Mac
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.3 Safari/605.1.15',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15',
-        # Chrome sur Android
-        'Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-        # Safari sur iOS
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1'
+# Cache pour éviter de répéter les mêmes requêtes
+@lru_cache(maxsize=100)
+def get_user_agent_fingerprint() -> str:
+    """Génère un fingerprint basé sur l'agent utilisateur pour la session"""
+    agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
     ]
-    return random.choice(user_agents)
-
-# Gestion des headers HTTP pour ressembler à un navigateur
-def get_browser_headers() -> Dict[str, str]:
-    """Génère un ensemble complet de headers HTTP réalistes"""
-    # Préférences linguistiques variées
-    lang_prefs = [
-        "en-US,en;q=0.9",
-        "en-US,en;q=0.9,fr;q=0.8",
-        "en-GB,en;q=0.9,en-US;q=0.8",
-        "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
-    ]
+    agent = random.choice(agents)
+    parsed_agent = parse(agent)
     
-    user_agent = get_random_user_agent()
+    # Assurer que l'agent semble humain
+    if parsed_agent.is_bot or parsed_agent.is_email_client:
+        agent = agents[0]  # Utilisez un agent par défaut fiable
+    
+    return agent
+
+def get_browser_fingerprint() -> Dict:
+    """Simule un fingerprint de navigateur cohérent"""
+    screen_resolutions = [
+        (1920, 1080), (1366, 768), (1440, 900), 
+        (1536, 864), (1280, 720), (2560, 1440)
+    ]
+    screen_width, screen_height = random.choice(screen_resolutions)
     
     return {
-        "User-Agent": user_agent,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": random.choice(lang_prefs),
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": "https://www.google.com/",
-        "Cache-Control": "max-age=0",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "DNT": "1"
+        "screen_width": screen_width,
+        "screen_height": screen_height,
+        "color_depth": random.choice([24, 32]),
+        "pixel_ratio": random.choice([1, 1.5, 2, 2.5]),
+        "language": random.choice(["en-US", "en-GB", "fr-FR", "es-ES", "de-DE"]),
+        "timezone_offset": random.randint(-720, 720),
+        "session_storage": True,
+        "local_storage": True,
+        "indexed_db": True,
+        "cpu_cores": random.randint(2, 16),
+        "platform": random.choice(["Win32", "MacIntel", "Linux x86_64"]),
+        "do_not_track": random.choice(["1", "0", None])
     }
 
-# Système de rotation de proxy intelligent
-class ProxyManager:
-    def __init__(self):
-        self.proxies = self._load_proxies()
-        self.proxy_health = {proxy: {"fails": 0, "last_success": 0} for proxy in self.proxies}
-        self.proxy_lock_time = 300  # secondes
-        self.last_used_index = -1
-        
-    def _load_proxies(self) -> List[str]:
-        """Charge les proxies depuis diverses sources"""
-        # Essayer de charger depuis variable d'environnement
-        env_proxies = os.getenv('PROXY_LIST')
-        if env_proxies:
-            try:
-                return json.loads(env_proxies)
-            except json.JSONDecodeError:
-                logger.warning("Erreur de parsing du JSON des proxies")
-                pass
-        
-        # Essayer de charger depuis un fichier
-        proxy_file = 'proxies.txt'
-        if os.path.exists(proxy_file):
-            with open(proxy_file, 'r') as f:
-                return [line.strip() for line in f if line.strip()]
-        
-        # Proxies par défaut (à remplacer par les vôtres)
-        return [
-            'http://proxy1:8080',
-            'http://proxy2:8080',
-            'http://proxy3:8080',
-            'http://proxy4:8080',
-            'http://proxy5:8080'
-        ]
+def get_smart_proxy() -> Optional[str]:
+    """Système intelligent de gestion des proxies avec vérification de disponibilité"""
+    proxy_list = [
+        "http://proxy1:8080",
+        "http://proxy2:8080",
+        "http://proxy3:8080",
+        "http://proxy4:8080", 
+        "http://proxy5:8080"
+    ]
     
-    def get_proxy(self) -> str:
-        """Obtient le proxy le plus sain disponible"""
-        # Si aucun proxy disponible, retourner None
-        if not self.proxies:
-            logger.warning("Aucun proxy disponible, tentative sans proxy")
-            return None
-            
-        current_time = time.time()
-        
-        # Filtrer les proxies récemment échoués
-        available_proxies = [
-            p for p in self.proxies 
-            if (current_time - self.proxy_health[p]["last_success"] > self.proxy_lock_time and 
-                self.proxy_health[p]["fails"] >= 3) or self.proxy_health[p]["fails"] < 3
-        ]
-        
-        if not available_proxies:
-            # Tous les proxies sont verrouillés, utiliser celui avec l'échec le plus ancien
-            proxy = min(self.proxies, key=lambda p: self.proxy_health[p]["last_success"])
-            logger.warning(f"Tous les proxies échouent, utilisation du moins récemment échoué: {proxy}")
-            return proxy
-            
-        # Trier par nombre d'échecs (ascendant) et dernier succès (descendant)
-        proxy = sorted(
-            available_proxies,
-            key=lambda p: (self.proxy_health[p]["fails"], -self.proxy_health[p]["last_success"])
-        )[0]
-        
-        logger.info(f"Proxy sélectionné: {proxy} (échecs: {self.proxy_health[proxy]['fails']})")
-        return proxy
+    # En environnement de production, remplacez par vos vrais proxies
+    # et implémentez une vérification de disponibilité
     
-    def report_success(self, proxy: str):
-        """Signaler une utilisation réussie du proxy"""
-        if proxy and proxy in self.proxy_health:
-            self.proxy_health[proxy]["fails"] = 0
-            self.proxy_health[proxy]["last_success"] = time.time()
+    working_proxies = []
+    for proxy in proxy_list:
+        try:
+            # Test proxy with short timeout
+            parsed = urlparse(proxy)
+            socket.create_connection((parsed.hostname, parsed.port), timeout=2)
+            working_proxies.append(proxy)
+        except:
+            logger.warning(f"Proxy {proxy} indisponible")
     
-    def report_failure(self, proxy: str):
-        """Signaler un échec d'utilisation du proxy"""
-        if proxy and proxy in self.proxy_health:
-            self.proxy_health[proxy]["fails"] += 1
-            logger.warning(f"Proxy {proxy} compte d'échecs: {self.proxy_health[proxy]['fails']}")
+    if not working_proxies:
+        logger.warning("Aucun proxy disponible, tentative sans proxy")
+        return None
+    
+    return random.choice(working_proxies)
 
-proxy_manager = ProxyManager()
+def get_headers(url: str) -> Dict[str, str]:
+    """Génère des en-têtes HTTP réalistes basés sur l'URL de destination"""
+    user_agent = get_user_agent_fingerprint()
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc
+    
+    # En-têtes de base réalistes
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate", 
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Pragma": "no-cache",
+        "Cache-Control": "no-cache"
+    }
+    
+    # Ajout d'un referer réaliste
+    if "youtube" in domain:
+        possible_referers = [
+            "https://www.google.com/",
+            "https://www.facebook.com/",
+            "https://twitter.com/",
+            f"https://{domain}/results?search_query={generate_random_search()}",
+            "https://www.reddit.com/r/videos/",
+        ]
+        headers["Referer"] = random.choice(possible_referers)
+    
+    return headers
 
-# Simulation de délai naturel
-def natural_delay(min_seconds=2, max_seconds=5):
-    """Crée un délai naturel ressemblant à un humain"""
-    # Délai de base
+def generate_random_search() -> str:
+    """Génère une recherche aléatoire plausible"""
+    words = ["how", "to", "best", "top", "funny", "amazing", "tutorial", 
+             "review", "music", "video", "game", "sports", "news"]
+    query = " ".join(random.sample(words, random.randint(2, 4)))
+    return query
+
+def human_delay(min_seconds=2, max_seconds=5):
+    """Simule un délai humain avec microvariations"""
     base_delay = random.uniform(min_seconds, max_seconds)
+    # Ajout de micro-pauses aléatoires pour simuler un comportement humain
+    micro_pauses = [random.uniform(0.1, 0.5) for _ in range(random.randint(1, 3))]
     
-    # Petite chance d'une pause plus longue (comme si l'utilisateur était distrait)
-    if random.random() < 0.05:  # 5% de chance
-        base_delay += random.uniform(2, 5)
-        
-    # Micro-pauses pour simuler le temps de réflexion ou la latence réseau
-    micro_pauses = sum(random.uniform(0.01, 0.2) for _ in range(random.randint(1, 3)))
+    delay = base_delay + sum(micro_pauses)
     
-    total_delay = base_delay + micro_pauses
-    logger.debug(f"Pause naturelle de {total_delay:.2f} secondes")
-    time.sleep(total_delay)
+    # Simuler des interactions utilisateur pendant le délai
+    time.sleep(delay * 0.6)  # Premier délai
+    
+    # Simuler un clic ou une action
+    if random.random() > 0.7:
+        time.sleep(random.uniform(0.1, 0.3))
+    
+    time.sleep(delay * 0.4)  # Deuxième délai
+    
+    logger.info(f"Délai humain simulé: {delay:.2f}s")
 
-# Création d'une session qui imite le comportement humain
-def create_human_session() -> requests.Session:
-    """Crée une session avec un comportement qui ressemble à un utilisateur humain"""
-    session = requests.Session()
-    headers = get_browser_headers()
-    session.headers.update(headers)
+def generate_filename(video_title: str, ext: str) -> str:
+    """Génère un nom de fichier sécurisé basé sur le titre"""
+    # Nettoyer le titre pour un nom de fichier valide
+    valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
+    safe_title = ''.join(c for c in video_title if c in valid_chars)
+    safe_title = safe_title[:50].strip()  # Limiter la longueur
     
-    # Définir des cookies courants
-    session.cookies.set("CONSENT", f"YES+cb.{time.time():.0f}", domain=".youtube.com")
-    session.cookies.set("VISITOR_INFO1_LIVE", f"{''.join(random.choices('0123456789abcdefABCDEF', k=16))}", domain=".youtube.com")
+    # Ajouter un identifiant unique pour éviter les collisions
+    unique_id = hashlib.md5(f"{video_title}{time.time()}".encode()).hexdigest()[:8]
     
-    return session
-
-# Simulation de navigation humaine
-def simulate_human_navigation(session: requests.Session, url: str) -> requests.Response:
-    """Simule des modèles de navigation humaine avant d'accéder à l'URL cible"""
-    try:
-        # Chaîne de redirection: Google -> Page d'accueil YouTube -> vidéo cible
-        video_id = url.split("watch?v=")[1].split("&")[0] if "watch?v=" in url else ""
-        if video_id:
-            google_search_url = "https://www.google.com/search?q=" + "+".join(video_id.split("-"))
-            
-            # Première requête vers Google
-            session.get(google_search_url, timeout=10)
-            natural_delay(1, 3)
-            
-            # Puis vers la page d'accueil YouTube
-            session.get("https://www.youtube.com/", timeout=10)
-            natural_delay(2, 4)
-        
-        # Enfin vers l'URL cible
-        response = session.get(url, timeout=10)
-        return response
-    except Exception as e:
-        logger.error(f"Erreur pendant la simulation de navigation: {e}")
-        # Revenir à une requête directe
-        return session.get(url, timeout=10)
+    return f"{safe_title}_{unique_id}.{ext}"
 
 def get_download_folder() -> str:
-    """Crée et retourne le dossier de téléchargement approprié pour Render"""
-    # Sur Render, utilisez /tmp qui est un système de fichiers temporaire
-    folder = os.path.join('/tmp', 'downloads', datetime.now().strftime('%Y-%m-%d'))
+    """Crée et retourne un dossier de téléchargement organisé"""
+    folder = os.path.join('downloads', datetime.now().strftime('%Y-%m-%d'))
     os.makedirs(folder, exist_ok=True)
     return folder
 
-# Gestion améliorée des cookies
-def manage_cookies() -> Dict:
-    """Charge les cookies avec des mécanismes de secours et rotation"""
+def load_cookies() -> Dict:
+    """Charge les cookies depuis le fichier ou l'environnement"""
     cookies_env = os.getenv('YOUTUBE_COOKIES')
-    cookies_file = os.getenv('COOKIES_FILE', 'cookies.json')
-    
-    cookies = {}
-    
-    # Essayer d'abord la variable d'environnement
     if cookies_env:
         try:
-            cookies = json.loads(cookies_env)
-            logger.info("Cookies chargés depuis la variable d'environnement")
+            return json.loads(cookies_env)
         except json.JSONDecodeError:
-            logger.warning("Échec de l'analyse des cookies depuis la variable d'environnement")
+            logger.error("Erreur de décodage des cookies")
     
-    # Ensuite essayer le fichier
-    if not cookies and os.path.exists(cookies_file):
+    # Essayer de charger depuis un fichier
+    cookie_file = 'cookies.json'
+    if os.path.exists(cookie_file):
         try:
-            with open(cookies_file, 'r') as f:
-                cookies = json.load(f)
-                logger.info(f"Cookies chargés depuis {cookies_file}")
-        except (json.JSONDecodeError, IOError) as e:
-            logger.warning(f"Échec du chargement des cookies depuis le fichier: {e}")
+            with open(cookie_file, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement des cookies: {e}")
     
-    # Ajouter des cookies YouTube courants si nous n'en avons pas
-    if not cookies:
-        logger.info("Pas de cookies trouvés, génération de cookies de secours")
-        cookies = {
-            "CONSENT": f"YES+cb.{time.time():.0f}",
-            "VISITOR_INFO1_LIVE": ''.join(random.choices('0123456789abcdefABCDEF', k=16)),  
-            "YSC": ''.join(random.choices('0123456789abcdefABCDEF', k=11)),
-            "GPS": "1",
-            "PREF": f"f4={random.randint(10000, 99999)}&f5={random.randint(10000, 99999)}"
-        }
-    
-    return cookies
-
-def save_cookies_to_file(cookies: Dict):
-    """Sauvegarde les cookies dans l'environnement et le fichier"""
-    try:
-        # Sauvegarder dans l'environnement
-        os.environ['YOUTUBE_COOKIES'] = json.dumps(cookies)
-        
-        # Sauvegarder dans le fichier
-        cookies_file = os.getenv('COOKIES_FILE', '/tmp/cookies.json')
-        with open(cookies_file, 'w') as f:
-            json.dump(cookies, f)
-            
-        logger.info("Cookies sauvegardés avec succès")
-    except Exception as e:
-        logger.error(f"Erreur lors de la sauvegarde des cookies: {e}")
-
-# Détection de Captcha
-def detect_captcha(html_content: str) -> bool:
-    """Détecte si une réponse contient un défi captcha"""
-    captcha_indicators = [
-        'www.google.com/recaptcha',
-        'g-recaptcha',
-        'captcha',
-        'solving the above captcha',
-        'security check',
-        'Confirm you are not a robot',  # Corrigé: apostrophe échappée
-        'challenge-form',
-        'challenge-running',
-        'unusual traffic'
-    ]
-    
-    for indicator in captcha_indicators:
-        if indicator in html_content.lower():
-            logger.warning(f"Captcha détecté: trouvé '{indicator}'")
-            return True
-    
-    return False
+    return {}
 
 @app.route('/')
 def index():
@@ -313,152 +217,89 @@ def video_info():
     try:
         data = request.get_json()
         if not data or 'url' not in data:
-            return jsonify({'error': 'No URL provided'}), 400
+            return jsonify({'error': 'URL non fournie'}), 400
 
         url = data['url']
-        logger.info(f"Extraction des infos pour: {url}")
+        logger.info(f"Demande d'info pour: {url}")
         
-        # Créer un fichier temporaire pour les cookies
-        with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as temp_cookies:
-            temp_cookies_path = temp_cookies.name
-            
-            # Première approche: Essayer avec une session ressemblant à un humain
-            try:
-                session = create_human_session()
-                proxy = proxy_manager.get_proxy()
-                if proxy:
-                    session.proxies = {"http": proxy, "https": proxy}
+        # Simulation de comportement utilisateur avant la requête
+        human_delay(1, 3)
+        
+        # Configuration avancée pour contourner les détections
+        ydl_opts = {
+            'quiet': True,
+            'skip_download': True,
+            'no_call_home': True,
+            'geo_bypass': True,
+            'prefer_free_formats': True,
+            'extract_flat': "in_playlist",
+            'http_headers': get_headers(url),
+            'logger': CustomLogger(),
+            'socket_timeout': 15,
+        }
+        
+        # Utilisation aléatoire de proxy pour éviter les motifs
+        if random.random() > 0.3:  # 70% de chance d'utiliser un proxy
+            proxy = get_smart_proxy()
+            if proxy:
+                ydl_opts['proxy'] = proxy
+        
+        # Utilisation conditionnelle des cookies
+        cookies = load_cookies()
+        if cookies:
+            cookies_file = f"temp_cookies_{int(time.time())}.json"
+            with open(cookies_file, 'w') as f:
+                json.dump(cookies, f)
+            ydl_opts['cookiefile'] = cookies_file
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
                 
-                # Simuler une navigation naturelle
-                natural_delay(1, 3)
-                response = simulate_human_navigation(session, url)
+                # Simulation d'interaction utilisateur
+                human_delay(1, 3)
                 
-                if detect_captcha(response.text):
-                    logger.warning("Captcha détecté dans la navigation initiale")
-                    # Passer à une approche différente en cas de captcha
-                    raise Exception("Captcha détecté")
+                formats = [{
+                    'format_id': f.get('format_id', ''),
+                    'ext': f.get('ext', ''),
+                    'resolution': f.get('resolution') or f"{f.get('height', '')}p",
+                    'format_note': f.get('format_note', ''),
+                    'filesize': f.get('filesize', 0) or f.get('filesize_approx', 0) or 0
+                } for f in info.get('formats', []) if f.get('vcodec') != 'none' or f.get('acodec') != 'none']
                 
-                # Sauvegarder les cookies de la session dans le fichier
-                cookies_dict = {name: value for name, value in session.cookies.items()}
+                # Suppression des doublons et tri par qualité
+                unique_formats = {}
+                for fmt in formats:
+                    key = f"{fmt['resolution']}_{fmt['ext']}"
+                    if key not in unique_formats or fmt['filesize'] > unique_formats[key]['filesize']:
+                        unique_formats[key] = fmt
                 
-                # Sauvegarder les cookies dans le fichier temporaire au format Netscape
-                with open(temp_cookies_path, 'w') as f:
-                    f.write("# Netscape HTTP Cookie File\n")
-                    for domain, cookies in session.cookies._cookies.items():
-                        for path, cookies_by_path in cookies.items():
-                            for name, cookie in cookies_by_path.items():
-                                f.write(f"{cookie.domain}\tTRUE\t{cookie.path}\t"
-                                      f"{'TRUE' if cookie.secure else 'FALSE'}\t"
-                                      f"{cookie.expires if cookie.expires else 0}\t"
-                                      f"{cookie.name}\t{cookie.value}\n")
+                sorted_formats = sorted(unique_formats.values(), 
+                                       key=lambda x: (0 if not x['resolution'] else 
+                                                   int(x['resolution'].replace('p', '')) if x['resolution'].replace('p', '').isdigit() else 0), 
+                                       reverse=True)
                 
-                if proxy:
-                    proxy_manager.report_success(proxy)
-            except Exception as e:
-                logger.warning(f"Approche de session humaine échouée: {e}")
-                # Continuer vers la méthode de secours
-            
-            # Préparer les options yt-dlp avec des paramètres anti-détection avancés
-            headers = get_browser_headers()
-            proxy = proxy_manager.get_proxy()
-            
-            ydl_opts = {
-                'quiet': True,
-                'skip_download': True,
-                'no_call_home': True,
-                'geo_bypass': True,
-                'geo_bypass_country': 'US',
-                'prefer_free_formats': True,
-                'nocheckcertificate': True,
-                'socket_timeout': 15,
-                'extractor_retries': 5,
-                'fragmentretries': 5,
-                'user_agent': headers["User-Agent"],
-                'http_headers': headers,
-                'proxy': proxy,
-                'cookiefile': temp_cookies_path,
-                'logger': CustomLogger(),
-                'sleep_interval_requests': random.randint(2, 5),
-                'sleep_interval': random.randint(1, 3),
-                'sleep_interval_subtitles': random.randint(1, 3)
-            }
-            
-            natural_delay(1.5, 3.5)
-            
-            formats = []
-            title = ''
-            thumbnail = ''
-            duration = 0
-            
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    
-                    if isinstance(info, str) and detect_captcha(info):
-                        logger.warning("Captcha détecté dans la réponse yt-dlp")
-                        if proxy:
-                            proxy_manager.report_failure(proxy)
-                        return jsonify({'error': 'Captcha détecté, veuillez réessayer dans quelques minutes'}), 429
-                    
-                    title = info.get('title', '')
-                    thumbnail = info.get('thumbnail', '')
-                    duration = info.get('duration', 0)
-                    
-                    formats = [{
-                        'format_id': f.get('format_id', ''),
-                        'ext': f.get('ext', ''),
-                        'resolution': f.get('resolution') or f"{f.get('height', '')}p",
-                        'format_note': f.get('format_note', ''),
-                        'filesize': f.get('filesize') or f.get('filesize_approx') or 0
-                    } for f in info.get('formats', []) if 
-                      (f.get('vcodec') != 'none' or f.get('acodec') != 'none') and
-                      (f.get('format_id') not in ['source']) and 
-                      (f.get('ext') in ['mp4', 'webm', 'm4a', 'mp3', 'ogg'])]
-                    
-                    # Garder seulement un nombre raisonnable de formats pour éviter les soupçons
-                    if len(formats) > 8:
-                        # Sélectionner une bonne variété tout en limitant les options
-                        resolutions = {}
-                        for f in formats:
-                            res = f.get('resolution', '')
-                            if res not in resolutions or f.get('filesize', 0) > resolutions[res].get('filesize', 0):
-                                resolutions[res] = f
-                        
-                        formats = list(resolutions.values())
-                    
-                    if proxy:
-                        proxy_manager.report_success(proxy)
-                    natural_delay(0.5, 2)
-                    
-                    logger.info("Extraction réussie")
-            except Exception as e:
-                logger.error(f"Erreur pendant l'extraction yt-dlp: {e}")
-                if proxy:
-                    proxy_manager.report_failure(proxy)
-                return jsonify({'error': str(e)}), 500
-            finally:
-                # Nettoyer le fichier temporaire
-                try:
-                    os.unlink(temp_cookies_path)
-                except Exception:
-                    pass
-            
-            return jsonify({
-                'success': True,
-                'title': title,
-                'thumbnail': thumbnail,
-                'duration': duration,
-                'formats': formats
-            })
+                logger.info(f"Extraction réussie pour: {info.get('title', '')}")
+                return jsonify({
+                    'success': True,
+                    'title': info.get('title', ''),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'duration': info.get('duration', 0),
+                    'uploader': info.get('uploader', ''),
+                    'formats': sorted_formats
+                })
+        finally:
+            # Nettoyage des fichiers temporaires
+            if 'cookiefile' in ydl_opts and os.path.exists(ydl_opts['cookiefile']):
+                os.remove(ydl_opts['cookiefile'])
+    
     except Exception as e:
-        logger.error(f"Erreur générale dans l'endpoint info: {e}")
+        logger.error(f"Erreur lors de l'extraction: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
 def download_video():
     output_path = None
-    temp_cookies_path = None
-    
     try:
         data = request.get_json()
         if not data or 'url' not in data or 'format_id' not in data:
@@ -466,141 +307,227 @@ def download_video():
 
         url = data['url']
         format_id = data['format_id']
-        logger.info(f"Téléchargement de la vidéo: {url} au format {format_id}")
-
-        # Créer un nom de fichier unique
-        filename = f"video_{uuid.uuid4().hex}.mp4"
-        output_path = os.path.join(get_download_folder(), filename)
         
-        # Créer un fichier temporaire pour les cookies
-        temp_fd, temp_cookies_path = tempfile.mkstemp(suffix='.txt')
-        os.close(temp_fd)
+        # Extraction préalable du titre pour le nom de fichier
+        with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = info.get('title', 'video')
         
-        # Créer une session ressemblant à un humain pour préparer la connexion
-        session = create_human_session()
-        proxy = proxy_manager.get_proxy()
-        if proxy:
-            session.proxies = {"http": proxy, "https": proxy}
+        # Génération d'un nom de fichier basé sur le titre
+        safe_filename = generate_filename(title, 'mp4')
+        output_path = os.path.join(get_download_folder(), safe_filename)
         
-        # Simuler une navigation naturelle avant le téléchargement
-        try:
-            natural_delay(1, 3)
-            response = simulate_human_navigation(session, url)
-            
-            if detect_captcha(response.text):
-                logger.warning("Captcha détecté dans la navigation pré-téléchargement")
-                if proxy:
-                    proxy_manager.report_failure(proxy)
-                # Nous essaierons une approche différente ci-dessous
-            else:
-                # Sauvegarder les cookies de la session dans le fichier
-                cookies_dict = {name: value for name, value in session.cookies.items()}
-                
-                # Sauvegarder les cookies au format Netscape
-                with open(temp_cookies_path, 'w') as f:
-                    f.write("# Netscape HTTP Cookie File\n")
-                    for domain, cookies in session.cookies._cookies.items():
-                        for path, cookies_by_path in cookies.items():
-                            for name, cookie in cookies_by_path.items():
-                                f.write(f"{cookie.domain}\tTRUE\t{cookie.path}\t"
-                                      f"{'TRUE' if cookie.secure else 'FALSE'}\t"
-                                      f"{cookie.expires if cookie.expires else 0}\t"
-                                      f"{cookie.name}\t{cookie.value}\n")
-        except Exception as e:
-            logger.warning(f"Navigation pré-téléchargement échouée: {e}")
-            # Retour aux cookies par défaut
-            cookies = manage_cookies()
-            with open(temp_cookies_path, 'w') as f:
-                for domain, name, value in [('.youtube.com', k, v) for k, v in cookies.items()]:
-                    f.write(f"{domain}\tTRUE\t/\tFALSE\t{int(time.time() + 3600*24*365)}\t{name}\t{value}\n")
+        logger.info(f"Téléchargement: {title} (format {format_id})")
         
-        # Configuration des options yt-dlp avancées pour imiter le comportement humain
-        headers = get_browser_headers()
-        proxy = proxy_manager.get_proxy()  # Obtenir un proxy potentiellement différent pour le téléchargement
-        
-        natural_delay(2, 5)
+        # Comportement humain
+        human_delay(2, 5)
         
         ydl_opts = {
             'format': format_id,
             'outtmpl': output_path,
             'no_call_home': True,
             'geo_bypass': True,
-            'geo_bypass_country': 'US',
             'prefer_free_formats': True,
-            'nocheckcertificate': True,
-            'socket_timeout': 30,
-            'extractor_retries': 5,
-            'fragmentretries': 10,
-            'retries': 10,
-            'user_agent': headers["User-Agent"],
-            'http_headers': headers,
-            'proxy': proxy,
-            'cookiefile': temp_cookies_path,
+            'http_headers': get_headers(url),
             'logger': CustomLogger(),
-            'restrictfilenames': True,
             'merge_output_format': 'mp4',
-            'write_description': False,  # Ne pas attirer l'attention avec des requêtes supplémentaires
-            'write_info_json': False,
-            'write_thumbnail': False,
-            'sleep_interval_requests': random.randint(3, 6),
-            'sleep_interval': random.randint(1, 3),
-            'sleep_interval_subtitles': random.randint(1, 3)
+            'postprocessors': [{
+                'key': 'FFmpegMetadata',
+                'add_metadata': True,
+            }],
+            'fragment_retries': 10,
+            'retries': 5,
+            'file_access_retries': 3,
+            'extractor_retries': 3,
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            natural_delay(3, 7)
-            ydl.download([url])
-            logger.info(f"Téléchargement terminé: {output_path}")
-            if proxy:
-                proxy_manager.report_success(proxy)
-            
-            return send_file(output_path, as_attachment=True)
+        # Utilisation d'un proxy différent du précédent
+        proxy = get_smart_proxy()
+        if proxy:
+            ydl_opts['proxy'] = proxy
+        
+        # Ajout des cookies
+        cookies = load_cookies()
+        if cookies:
+            cookies_file = f"temp_cookies_{int(time.time())}.json"
+            with open(cookies_file, 'w') as f:
+                json.dump(cookies, f)
+            ydl_opts['cookiefile'] = cookies_file
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Simulation d'interactions humaines pendant le téléchargement
+                human_delay(3, 8)
+                ydl.download([url])
+                
+                logger.info(f"Téléchargement terminé: {output_path}")
+                
+                return send_file(
+                    output_path, 
+                    as_attachment=True,
+                    download_name=safe_filename,
+                    mimetype='video/mp4'
+                )
+        finally:
+            # Nettoyage des fichiers temporaires
+            if 'cookiefile' in ydl_opts and os.path.exists(ydl_opts['cookiefile']):
+                os.remove(ydl_opts['cookiefile'])
+                
     except Exception as e:
-        logger.error(f"Erreur pendant le téléchargement: {e}")
-        if 'proxy' in locals() and proxy:
-            proxy_manager.report_failure(proxy)
+        logger.error(f"Erreur de téléchargement: {str(e)}")
         return jsonify({'error': str(e)}), 500
     finally:
-        # Nettoyer les fichiers
+        # Nettoyage conditionnelle du fichier
         if output_path and os.path.exists(output_path):
             try:
-                os.remove(output_path)
-                logger.info(f"Fichier supprimé: {output_path}")
-            except Exception as remove_error:
-                logger.error(f"Erreur lors de la suppression du fichier {output_path}: {remove_error}")
-        
-        if temp_cookies_path and os.path.exists(temp_cookies_path):
-            try:
-                os.remove(temp_cookies_path)
-            except Exception:
-                pass
+                # Option: garder les fichiers plutôt que de les supprimer
+                # pour réduire les téléchargements répétés
+                if os.getenv('KEEP_FILES') != 'true':
+                    os.remove(output_path)
+                    logger.info(f"Fichier supprimé: {output_path}")
+            except Exception as e:
+                logger.error(f"Erreur de suppression: {str(e)}")
 
-@app.route('/health', methods=['GET'])
+@app.route('/health')
 def health_check():
-    """Endpoint de vérification d'état de base qui valide également la connectivité YouTube"""
-    try:
-        # Créer une session et tester l'accès à YouTube
-        session = create_human_session()
-        proxy = proxy_manager.get_proxy()
-        if proxy:
-            session.proxies = {"http": proxy, "https": proxy}
-        
-        response = session.get("https://www.youtube.com/", timeout=10)
-        if response.status_code == 200 and not detect_captcha(response.text):
-            if proxy:
-                proxy_manager.report_success(proxy)
-            return jsonify({"status": "ok", "youtube_access": True})
-        else:
-            if proxy:
-                proxy_manager.report_failure(proxy)
-            return jsonify({"status": "degraded", "youtube_access": False}), 503
-    except Exception as e:
-        logger.error(f"Échec de la vérification de l'état: {e}")
-        if 'proxy' in locals() and proxy:
-            proxy_manager.report_failure(proxy)
-        return jsonify({"status": "error", "message": str(e)}), 500
+    """Point de terminaison pour vérifier l'état du service"""
+    return jsonify({'status': 'ok', 'time': datetime.now().isoformat()})
 
 if __name__ == '__main__':
-    # Utiliser dossiers temporaires pour Render
-    os.makedirs('/tmp/downloads', exist_ok=True)
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    os.makedirs('downloads', exist_ok=True)
+    
+    # Fichier de template HTML minimal si manquant
+    templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+    os.makedirs(templates_dir, exist_ok=True)
+    
+    index_html = os.path.join(templates_dir, 'index.html')
+    if not os.path.exists(index_html):
+        with open(index_html, 'w') as f:
+            f.write('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>YouTube Downloader</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .container { background: #f9f9f9; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input, select, button { padding: 10px; margin: 10px 0; width: 100%; }
+        button { background: #ff0000; color: white; border: none; cursor: pointer; }
+        button:hover { background: #cc0000; }
+        #result { margin-top: 20px; }
+        .hidden { display: none; }
+        .format-item { padding: 5px; margin: 5px 0; background: #eee; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Downloader</h1>
+        <input type="text" id="url" placeholder="Collez l'URL YouTube ici" />
+        <button id="getInfo">Obtenir les informations</button>
+        
+        <div id="videoInfo" class="hidden">
+            <h2 id="videoTitle"></h2>
+            <img id="thumbnail" width="320" />
+            <p id="duration"></p>
+            
+            <h3>Formats disponibles</h3>
+            <div id="formats"></div>
+        </div>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        document.getElementById('getInfo').addEventListener('click', async () => {
+            const url = document.getElementById('url').value.trim();
+            if (!url) return;
+            
+            document.getElementById('result').innerHTML = 'Chargement...';
+            
+            try {
+                const response = await fetch('/info', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url})
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('videoTitle').textContent = data.title;
+                    document.getElementById('thumbnail').src = data.thumbnail;
+                    document.getElementById('duration').textContent = `Durée: ${Math.floor(data.duration / 60)}:${(data.duration % 60).toString().padStart(2, '0')}`;
+                    
+                    const formatsDiv = document.getElementById('formats');
+                    formatsDiv.innerHTML = '';
+                    
+                    data.formats.forEach(format => {
+                        const formatDiv = document.createElement('div');
+                        formatDiv.className = 'format-item';
+                        formatDiv.innerHTML = `
+                            <strong>${format.resolution || 'Audio'} - ${format.ext}</strong>
+                            ${format.format_note ? ` (${format.format_note})` : ''}
+                            <button class="download-btn" data-format="${format.format_id}">Télécharger</button>
+                        `;
+                        formatsDiv.appendChild(formatDiv);
+                    });
+                    
+                    document.getElementById('videoInfo').classList.remove('hidden');
+                    document.getElementById('result').innerHTML = '';
+                    
+                    // Ajouter les gestionnaires d'événements
+                    document.querySelectorAll('.download-btn').forEach(btn => {
+                        btn.addEventListener('click', () => downloadVideo(url, btn.dataset.format));
+                    });
+                } else {
+                    document.getElementById('result').innerHTML = `Erreur: ${data.error}`;
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `Erreur: ${error.message}`;
+            }
+        });
+        
+        async function downloadVideo(url, formatId) {
+            document.getElementById('result').innerHTML = 'Téléchargement en cours...';
+            
+            try {
+                const response = await fetch('/download', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url, format_id: formatId})
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const downloadUrl = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = downloadUrl;
+                    
+                    // Get filename from Content-Disposition
+                    const contentDisposition = response.headers.get('Content-Disposition');
+                    const filenameMatch = contentDisposition && contentDisposition.match(/filename="(.+)"/);
+                    const filename = filenameMatch ? filenameMatch[1] : 'video.mp4';
+                    
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(downloadUrl);
+                    document.getElementById('result').innerHTML = 'Téléchargement terminé!';
+                } else {
+                    const errorData = await response.json();
+                    document.getElementById('result').innerHTML = `Erreur: ${errorData.error}`;
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `Erreur: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
+            ''')
+    
+    # Démarrage du serveur
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
