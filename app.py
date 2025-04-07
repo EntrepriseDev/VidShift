@@ -83,7 +83,7 @@ def get_browser_fingerprint() -> Dict:
 def get_smart_proxy() -> Optional[str]:
     """Système intelligent de gestion des proxies avec vérification de disponibilité"""
     proxy_list = [
-        "http://proxy1:8080",
+        "http://172.67.181.112:80",
         "http://proxy2:8080",
         "http://proxy3:8080",
         "http://proxy4:8080", 
