@@ -8,7 +8,10 @@ from functools import wraps
 import time
 import random
 import re
+import json
 from pathlib import Path
+import requests
+from datetime import datetime, timedelta
 
 # Configuration améliorée
 app = Flask(__name__)
@@ -17,217 +20,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 TEMP_DIR = tempfile.gettempdir()
 
-# Créer le répertoire templates s'il n'existe pas
-templates_dir = Path(os.path.dirname(os.path.abspath(__file__))) / 'templates'
-templates_dir.mkdir(exist_ok=True)
-
-# Créer le fichier index.html dans le répertoire templates
-index_html_path = templates_dir / 'index.html'
-if not index_html_path.exists():
-    with open(index_html_path, 'w', encoding='utf-8') as f:
-        f.write('''<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Downloader Pro</title>
-    <style>
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-            max-width: 800px; 
-            margin: 0 auto; 
-            padding: 20px; 
-            background: #f9f9f9; 
-            color: #333; 
-        }
-        h1 { 
-            color: #ff0000; 
-            text-align: center; 
-        }
-        input, button, select { 
-            padding: 12px; 
-            margin: 10px 0; 
-            width: 100%; 
-            box-sizing: border-box; 
-            border-radius: 4px; 
-            border: 1px solid #ddd; 
-        }
-        button { 
-            background: #ff0000; 
-            color: white; 
-            border: none; 
-            cursor: pointer; 
-            font-weight: bold; 
-            transition: all 0.3s; 
-        }
-        button:hover { 
-            background: #cc0000; 
-        }
-        #formats { 
-            margin-top: 20px; 
-            background: white; 
-            padding: 15px; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
-        }
-        #result { 
-            margin-top: 20px; 
-            padding: 15px; 
-            border-radius: 8px; 
-            background: #f0f0f0; 
-            text-align: center; 
-        }
-        .hidden { 
-            display: none; 
-        }
-        .thumbnail { 
-            display: block; 
-            margin: 10px auto; 
-            border-radius: 5px; 
-            max-width: 300px;
-        }
-        .loading { 
-            display: inline-block; 
-            width: 20px; 
-            height: 20px; 
-            border: 3px solid rgba(255,0,0,.3); 
-            border-radius: 50%; 
-            border-top-color: #ff0000; 
-            animation: spin 1s ease-in-out infinite; 
-            margin-right: 10px; 
-            vertical-align: middle; 
-        }
-        @keyframes spin { 
-            to { transform: rotate(360deg); } 
-        }
-        .format-option { 
-            margin: 5px 0; 
-            padding: 8px; 
-            background: #f9f9f9; 
-            border-radius: 4px; 
-        }
-        select { 
-            background: #fff; 
-        }
-    </style>
-</head>
-<body>
-    <h1>YouTube Downloader Pro</h1>
-    <div>
-        <input type="text" id="url" placeholder="Coller l'URL de la vidéo YouTube ici...">
-        <button onclick="getInfo()">Analyser<span id="analyze-spinner" class="loading hidden"></span></button>
-    </div>
-    <div id="formats" class="hidden"></div>
-    <div id="result" class="hidden"></div>
-    <script>
-        // Ajout d'un délai aléatoire pour simuler un comportement humain
-        function humanDelay(callback) {
-            setTimeout(callback, Math.random() * 300 + 100);
-        }
-        
-        async function getInfo() {
-            const url = document.getElementById('url').value.trim();
-            if (!url) return;
-            
-            // Afficher le spinner
-            document.getElementById('analyze-spinner').classList.remove('hidden');
-            document.getElementById('formats').classList.add('hidden');
-            document.getElementById('result').classList.add('hidden');
-            
-            try {
-                // Attendre un peu avant d'envoyer pour simuler un humain
-                await new Promise(r => setTimeout(r, Math.random() * 700 + 300));
-                
-                const response = await fetch('/info', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({url, timestamp: Date.now()})
-                });
-                
-                const data = await response.json();
-                if (data.error) throw new Error(data.error);
-                
-                humanDelay(() => {
-                    document.getElementById('formats').innerHTML = `
-                        <h2>${data.title}</h2>
-                        ${data.thumbnail ? `<img src="${data.thumbnail}" class="thumbnail">` : ''}
-                        <p>Durée: ${Math.floor(data.duration / 60)}:${String(data.duration % 60).padStart(2, '0')}</p>
-                        <h3>Formats disponibles:</h3>
-                        <select id="format_selector">
-                            ${data.formats.map(f => 
-                                `<option value="${f.format_id}">${f.resolution || f.format_note} (${f.ext}) - ${Math.round(f.filesize/1024/1024 || 0)}MB</option>`
-                            ).join('')}
-                        </select>
-                        <button onclick="downloadVideo()">Télécharger<span id="download-spinner" class="loading hidden"></span></button>
-                    `;
-                    document.getElementById('formats').classList.remove('hidden');
-                    document.getElementById('analyze-spinner').classList.add('hidden');
-                });
-            } catch (error) {
-                document.getElementById('analyze-spinner').classList.add('hidden');
-                document.getElementById('result').innerHTML = `Erreur: ${error.message}`;
-                document.getElementById('result').classList.remove('hidden');
-            }
-        }
-        
-        async function downloadVideo() {
-            const url = document.getElementById('url').value;
-            const format_id = document.getElementById('format_selector').value;
-            
-            document.getElementById('download-spinner').classList.remove('hidden');
-            document.getElementById('result').innerHTML = 'Téléchargement en cours...';
-            document.getElementById('result').classList.remove('hidden');
-            
-            try {
-                // Simuler une interaction humaine avec un léger délai
-                await new Promise(r => setTimeout(r, Math.random() * 500 + 200));
-                
-                const response = await fetch('/download', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        url, 
-                        format_id,
-                        timestamp: Date.now(),
-                        client_id: Math.random().toString(36).substring(2, 15)
-                    })
-                });
-                
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'video.mp4';
-                    document.body.appendChild(a);
-                    
-                    // Léger délai avant de cliquer pour simuler un comportement humain
-                    setTimeout(() => {
-                        a.click();
-                        window.URL.revokeObjectURL(url);
-                        document.getElementById('download-spinner').classList.add('hidden');
-                        document.getElementById('result').innerHTML = 'Téléchargement terminé!';
-                    }, Math.random() * 300 + 100);
-                } else {
-                    const error = await response.json();
-                    document.getElementById('download-spinner').classList.add('hidden');
-                    document.getElementById('result').innerHTML = `Erreur: ${error.error}`;
-                }
-            } catch (error) {
-                document.getElementById('download-spinner').classList.add('hidden');
-                document.getElementById('result').innerHTML = `Erreur: ${error.message}`;
-            }
-        }
-        
-        // Ajouter un écouteur pour l'appui sur Entrée dans le champ URL
-        document.getElementById('url').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                getInfo();
-            }
-        });
-    </script>
-</body>
-</html>''')
+# Liste des proxies
+proxy_list = [
+    "http://172.67.181.112:80",
+    "http://172.67.0.16:80",
+    "http://104.20.75.222:80",
+    "http://172.67.68.124:80",
+    "http://203.24.108.86:80",
+    "http://203.23.104.223:80"
+]
 
 # User agents réalistes - Optimisés et mis à jour
 USER_AGENTS = [
@@ -238,7 +39,56 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1'
 ]
 
-# Fonction pour obtenir un user-agent aléatoire - Optimisée
+# Empreintes numériques de navigateur avancées
+BROWSER_FINGERPRINTS = [
+    {
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "accept-language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "sec-ch-ua": '"Google Chrome";v="121", "Not;A=Brand";v="8", "Chromium";v="121"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
+        "upgrade-insecure-requests": "1",
+        "viewport-width": "1920",
+        "device-memory": "8"
+    },
+    {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "viewport-width": "1680",
+        "device-memory": "16"
+    },
+    {
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "accept-language": "fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3",
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
+        "upgrade-insecure-requests": "1",
+        "viewport-width": "1366",
+        "device-memory": "4"
+    }
+]
+
+# Fonction pour obtenir un proxy aléatoire
+def get_random_proxy():
+    return random.choice(proxy_list)
+
+# Fonction pour obtenir une empreinte de navigateur complète
+def get_browser_fingerprint():
+    return random.choice(BROWSER_FINGERPRINTS)
+
+# Fonction pour obtenir un user-agent aléatoire
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
@@ -295,28 +145,115 @@ def rate_limit(limit=5, per=60, jitter=True):
         return wrapped
     return decorator
 
+# Fonction pour générer des valeurs de cookies YouTube aléatoires
+def generate_youtube_cookies():
+    # Générer un ID d'utilisateur YouTube 
+    youtube_user_id = ''.join(random.choices('0123456789', k=22))
+    
+    # Générer un token SAPISID (important pour certaines requêtes YouTube)
+    sapisid = ''.join(random.choices('0123456789', k=16))
+    
+    # Générer un token SID
+    sid = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=22))
+    
+    # Générer un token HSID
+    hsid = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=19))
+    
+    # Générer un token SSID
+    ssid = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=19))
+    
+    # Générer un token APISID
+    apisid = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=19))
+    
+    # Générer un token LOGIN_INFO (très important pour YouTube)
+    login_info = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=160))
+    
+    # Générer un timestamp pour le cookie CONSENT
+    two_years_from_now = int((datetime.now() + timedelta(days=730)).timestamp())
+    
+    # Pour VISITOR_INFO1_LIVE (un cookie d'identification important)
+    visitor_info = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=20))
+    
+    # Pour YSC (exige par YouTube pour le suivi de session)
+    ysc = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=11))
+    
+    # PREF (préférences utilisateur)
+    pref_id = f"f1{random.randint(1000000, 9999999)}"
+    
+    # Cookie anti-bot __Secure-YEC
+    secure_yec = ''.join(random.choices('0123456789', k=10))
+    
+    # Générer un jeton anti-bot VISITOR_PRIVACY_METADATA
+    visitor_privacy = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=26))
+    
+    # Générer un jeton anti-bot pour IDE (utilisé par DoubleClick/Google)
+    ide_token = ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_', k=24))
+    
+    # Valeurs possibles pour le pays
+    countries = ['FR', 'US', 'GB', 'DE', 'CA', 'AU']
+    country = random.choice(countries)
+    
+    # Les langues associées aux pays
+    languages = {
+        'FR': 'fr-FR',
+        'US': 'en-US',
+        'GB': 'en-GB',
+        'DE': 'de-DE',
+        'CA': 'en-CA,fr-CA',
+        'AU': 'en-AU'
+    }
+    
+    lang = languages.get(country, 'en-US')
+    
+    return f"""# Netscape HTTP Cookie File
+# http://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file! Do not edit.
+
+.youtube.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tCONSENT\tYES+cb.20231125-07-p0.{country}+FX+{random.randint(100, 999)}
+.youtube.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tVISITOR_INFO1_LIVE\t{visitor_info}
+.youtube.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tPREF\t{pref_id}&tz=Europe%2FParis&f6=40000000&f5=30000
+.youtube.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tYSC\t{ysc}
+.youtube.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tLOGIN_INFO\t{login_info}
+.google.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tSID\t{sid}
+.google.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tHSID\t{hsid}
+.google.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tSSID\t{ssid}
+.google.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tAPISID\t{apisid}
+.google.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tSAPISID\t{sapisid}
+.youtube.com\tTRUE\t/\tTRUE\t{two_years_from_now}\t__Secure-YEC\t{secure_yec}
+.youtube.com\tTRUE\t/\tFALSE\t{two_years_from_now}\tVISITOR_PRIVACY_METADATA\t{visitor_privacy}
+.doubleclick.net\tTRUE\t/\tFALSE\t{two_years_from_now}\tIDE\t{ide_token}
+"""
+
+# Fonction pour régénérer et actualiser les cookies
+def refresh_cookies():
+    cookie_path = Path(os.path.dirname(os.path.abspath(__file__))) / 'cookies.txt'
+    
+    try:
+        # Générer de nouveaux cookies YouTube
+        with open(cookie_path, 'w') as f:
+            f.write(generate_youtube_cookies())
+        logger.info("Fichier de cookies régénéré avec succès")
+    except Exception as e:
+        logger.error(f"Erreur lors de la régénération des cookies: {str(e)}")
+    
+    return str(cookie_path)
+
 # Fonction pour générer un fichier de cookies YouTube valide - Optimisée avec Path
 def ensure_valid_cookie():
     cookie_path = Path(os.path.dirname(os.path.abspath(__file__))) / 'cookies.txt'
     
-    # Si le fichier de cookies n'existe pas ou est vide, on crée un fichier basique
+    # Si le fichier de cookies n'existe pas ou est vide, on crée un fichier avec des cookies réalistes
     if not cookie_path.exists() or cookie_path.stat().st_size == 0:
         try:
-            # Génération d'un cookie de consentement YouTube minimal
             with open(cookie_path, 'w') as f:
-                f.write("""# Netscape HTTP Cookie File
-.youtube.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+cb.20210328-17-p0.en-GB+FX+{0}
-.youtube.com\tTRUE\t/\tFALSE\t2147483647\tVISITOR_INFO1_LIVE\t{1}
-.youtube.com\tTRUE\t/\tFALSE\t2147483647\tPREF\tid=f1&tz=Europe%2FParis&f6=40000000&f5=30000
-.youtube.com\tTRUE\t/\tFALSE\t2147483647\tYSC\t{2}
-""".format(
-                    random.randint(100, 999),
-                    ''.join(random.choices('0123456789ABCDEFabcdef', k=16)),
-                    ''.join(random.choices('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', k=11))
-                ))
+                f.write(generate_youtube_cookies())
             logger.info("Fichier de cookies créé avec succès")
         except Exception as e:
             logger.error(f"Erreur lors de la création du fichier de cookies: {str(e)}")
+    
+    # Régénérer occasionnellement les cookies pour éviter la détection
+    elif random.random() < 0.1:  # 10% de chance de régénérer les cookies
+        return refresh_cookies()
     
     return str(cookie_path)
 
@@ -328,12 +265,12 @@ def extract_video_id(url):
     match = re.search(pattern, url)
     return match.group(1) if match else None
 
-# Page d'accueil - Simplifiée pour utiliser directement le template
+# Page d'accueil - Utilise le template existant
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Obtenir les informations de la vidéo - Optimisé
+# Obtenir les informations de la vidéo - Optimisé avec rotation de proxy
 @app.route('/info', methods=['POST'])
 @rate_limit(limit=10, per=60)
 def video_info():
@@ -355,9 +292,15 @@ def video_info():
         
         # Configuration avancée pour contourner les limitations de YouTube
         cookie_path = ensure_valid_cookie()
-        user_agent = get_random_user_agent()
         
-        # Options améliorées et optimisées
+        # Obtenir une empreinte de navigateur complète
+        browser_fingerprint = get_browser_fingerprint()
+        user_agent = browser_fingerprint["userAgent"]
+        
+        # Sélectionner un proxy aléatoire
+        proxy = get_random_proxy()
+        
+        # Options améliorées avec empreinte numérique complète et proxy
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -367,6 +310,7 @@ def video_info():
                 'youtube': {
                     'skip': ['dash', 'hls'],
                     'player_client': ['web', 'android'],
+                    'innertube_client': ['web', 'android'],
                 }
             },
             'nocheckcertificate': True,
@@ -378,16 +322,24 @@ def video_info():
             'user_agent': user_agent,
             'http_headers': {
                 'User-Agent': user_agent,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Sec-Fetch-Mode': 'navigate',
+                'Accept': browser_fingerprint.get('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
+                'Accept-Language': browser_fingerprint.get('accept-language', 'en-us,en;q=0.5'),
+                'Sec-Fetch-Mode': browser_fingerprint.get('sec-fetch-mode', 'navigate'),
+                'Sec-Fetch-Dest': browser_fingerprint.get('sec-fetch-dest', 'document'),
+                'Sec-Fetch-Site': browser_fingerprint.get('sec-fetch-site', 'none'),
+                'Sec-Ch-Ua': browser_fingerprint.get('sec-ch-ua', ''),
+                'Sec-Ch-Ua-Mobile': browser_fingerprint.get('sec-ch-ua-mobile', '?0'),
+                'Sec-Ch-Ua-Platform': browser_fingerprint.get('sec-ch-ua-platform', ''),
+                'Viewport-Width': browser_fingerprint.get('viewport-width', '1920'),
+                'Device-Memory': browser_fingerprint.get('device-memory', '8'),
                 'Origin': 'https://www.youtube.com',
                 'Referer': f'https://www.youtube.com/watch?v={video_id}'
             },
             'socket_timeout': 15,
             'source_address': '0.0.0.0',
             'sleep_interval': random.randint(1, 3),
-            'max_sleep_interval': 5
+            'max_sleep_interval': 5,
+            'proxy': proxy  # Utilisation du proxy
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -433,10 +385,13 @@ def video_info():
             return jsonify({'error': 'Cette vidéo est réservée aux utilisateurs Premium.'}), 403
         elif "Sign in to confirm your age" in error_msg:
             return jsonify({'error': 'Cette vidéo nécessite une vérification d\'âge.'}), 403
+        elif "Unable to extract" in error_msg or "HTTP Error" in error_msg:
+            # Essayer un autre proxy en cas d'erreur
+            return jsonify({'error': 'Erreur temporaire. Veuillez réessayer dans quelques instants.'}), 503
         else:
             return jsonify({'error': 'Erreur lors de l\'extraction des informations. Veuillez réessayer.'}), 500
 
-# Télécharger la vidéo - Optimisé
+# Télécharger la vidéo - Optimisé avec rotation de proxy et empreinte numérique avancée
 @app.route('/download', methods=['POST'])
 @rate_limit(limit=2, per=300, jitter=True)  # Limite stricte pour les téléchargements
 def download_video():
@@ -459,12 +414,18 @@ def download_video():
         
         # Configuration avancée pour éviter la détection
         cookie_path = ensure_valid_cookie()
-        user_agent = get_random_user_agent()
+        
+        # Obtenir une empreinte de navigateur complète
+        browser_fingerprint = get_browser_fingerprint()
+        user_agent = browser_fingerprint["userAgent"]
+        
+        # Sélectionner un proxy aléatoire
+        proxy = get_random_proxy()
         
         # Ajout d'un délai aléatoire pour simuler un comportement humain
         time.sleep(random.uniform(1.0, 2.5))
         
-        # Options de téléchargement optimisées
+        # Options de téléchargement optimisées avec empreinte numérique complète
         ydl_opts = {
             'format': format_id,
             'outtmpl': output_path,
@@ -476,9 +437,16 @@ def download_video():
             'user_agent': user_agent,
             'http_headers': {
                 'User-Agent': user_agent,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Sec-Fetch-Mode': 'navigate',
+                'Accept': browser_fingerprint.get('accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
+                'Accept-Language': browser_fingerprint.get('accept-language', 'en-us,en;q=0.5'),
+                'Sec-Fetch-Mode': browser_fingerprint.get('sec-fetch-mode', 'navigate'),
+                'Sec-Fetch-Dest': browser_fingerprint.get('sec-fetch-dest', 'document'),
+                'Sec-Fetch-Site': browser_fingerprint.get('sec-fetch-site', 'none'),
+                'Sec-Ch-Ua': browser_fingerprint.get('sec-ch-ua', ''),
+                'Sec-Ch-Ua-Mobile': browser_fingerprint.get('sec-ch-ua-mobile', '?0'),
+                'Sec-Ch-Ua-Platform': browser_fingerprint.get('sec-ch-ua-platform', ''),
+                'Viewport-Width': browser_fingerprint.get('viewport-width', '1920'),
+                'Device-Memory': browser_fingerprint.get('device-memory', '8'),
                 'Origin': 'https://www.youtube.com',
                 'Referer': f'https://www.youtube.com/watch?v={video_id}'
             },
@@ -493,15 +461,31 @@ def download_video():
                 'youtube': {
                     'player_client': ['web', 'android', 'mobile'],
                     'player_skip': random.choice([None, 'configs', 'webpage']),
+                    'innertube_client': ['web', 'android', 'embedded'],
                 }
-            }
+            },
+            'proxy': proxy  # Utilisation du proxy
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = info.get('title', 'video').replace('/', '_').replace('\\', '_')
-            extension = info.get('ext', 'mp4')
-            
+        # Tentative avec rotation de proxy en cas d'échec
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    title = info.get('title', 'video').replace('/', '_').replace('\\', '_')
+                    extension = info.get('ext', 'mp4')
+                break  # Si réussi, on sort de la boucle
+            except Exception as e:
+                if retry < max_retries - 1:
+                    logger.warning(f"Tentative {retry+1} échouée. Changement de proxy...")
+                    # Changer de proxy et de cookies pour la prochaine tentative
+                    ydl_opts['proxy'] = get_random_proxy()
+                    ydl_opts['cookiefile'] = refresh_cookies()
+                    time.sleep(random.uniform(1.5, 3.0))
+                else:
+                    raise e
+        
         # Envoyer le fichier avec le nom de la vidéo
         response = send_file(
             output_path, 
@@ -541,8 +525,145 @@ def download_video():
             return jsonify({'error': 'Vidéo non disponible. Elle pourrait être privée ou supprimée.'}), 404
         elif "This video is available for Premium users only" in error_msg:
             return jsonify({'error': 'Cette vidéo est réservée aux utilisateurs Premium.'}), 403
+        elif "Unable to extract" in error_msg or "HTTP Error" in error_msg:
+            # Essayer de changer de proxy et cookies en cas d'erreur
+            refresh_cookies()
+            return jsonify({'error': 'Erreur temporaire. Veuillez réessayer dans quelques instants.'}), 503
         else:
             return jsonify({'error': 'Erreur lors du téléchargement. Veuillez réessayer.'}), 500
+
+# Fonction pour tester et vérifier la validité des proxies
+@app.route('/test_proxies', methods=['GET'])
+def test_proxies():
+    if request.remote_addr != '127.0.0.1' and not request.remote_addr.startswith('192.168.'):
+        return jsonify({'error': 'Accès non autorisé'}), 403
+        
+    results = []
+    for proxy in proxy_list:
+        try:
+            # Tester le proxy avec une requête à YouTube
+            response = requests.get(
+                'https://www.youtube.com/robots.txt', 
+                proxies={'http': proxy, 'https': proxy}, 
+                timeout=5,
+                headers={'User-Agent': get_random_user_agent()}
+            )
+            results.append({
+                'proxy': proxy,
+                'status': 'OK' if response.status_code == 200 else 'ERREUR',
+                'code': response.status_code,
+                'time': response.elapsed.total_seconds()
+            })
+        except Exception as e:
+            results.append({
+                'proxy': proxy,
+                'status': 'ERREUR',
+                'error': str(e)
+            })
+    
+    return jsonify(results)
+
+# Route pour la régénération des cookies - accessible uniquement en local
+@app.route('/refresh_cookies', methods=['GET'])
+def refresh_cookies_route():
+    if request.remote_addr != '127.0.0.1' and not request.remote_addr.startswith('192.168.'):
+        return jsonify({'error': 'Accès non autorisé'}), 403
+        
+    try:
+        cookie_path = refresh_cookies()
+        return jsonify({'success': True, 'message': f'Cookies régénérés avec succès: {cookie_path}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+# Fonction pour vérifier l'état du service YouTube
+def check_youtube_status():
+    """Vérifie si YouTube est accessible et fonctionne correctement"""
+    working_proxies = []
+    
+    for proxy in proxy_list:
+        try:
+            browser_fingerprint = get_browser_fingerprint()
+            user_agent = browser_fingerprint["userAgent"]
+            
+            response = requests.get(
+                'https://www.youtube.com/robots.txt', 
+                proxies={'http': proxy, 'https': proxy}, 
+                timeout=5,
+                headers={
+                    'User-Agent': user_agent,
+                    'Accept': browser_fingerprint.get('accept', '*/*'),
+                    'Accept-Language': browser_fingerprint.get('accept-language', 'en-US,en;q=0.9')
+                }
+            )
+            
+            if response.status_code == 200:
+                working_proxies.append(proxy)
+                
+        except Exception:
+            continue
+    
+    return len(working_proxies) > 0
+
+# Vérification régulière de la validité des cookies et des proxies
+def scheduled_maintenance():
+    """Effectue des vérifications périodiques des ressources et les actualise si nécessaire"""
+    try:
+        # Vérifier si YouTube est accessible
+        youtube_ok = check_youtube_status()
+        
+        if not youtube_ok:
+            logger.warning("YouTube semble inaccessible avec les proxies actuels.")
+            # Logique pour essayer d'obtenir de nouveaux proxies ou notifier l'administrateur
+        
+        # Régénérer régulièrement les cookies pour éviter la détection
+        refresh_cookies()
+        
+        # Nettoyer les fichiers temporaires
+        clean_temp_files()
+        
+        logger.info("Maintenance planifiée terminée avec succès")
+    except Exception as e:
+        logger.error(f"Erreur lors de la maintenance planifiée: {str(e)}")
+
+# Fonction pour nettoyer les fichiers temporaires
+def clean_temp_files():
+    """Nettoie les fichiers vidéo temporaires qui pourraient rester"""
+    try:
+        # Recherche tous les fichiers vidéo temporaires de plus de 1 heure
+        now = time.time()
+        count = 0
+        
+        for file in os.listdir(TEMP_DIR):
+            if file.startswith("video_") and (file.endswith(".mp4") or file.endswith(".webm") or file.endswith(".mp3")):
+                file_path = os.path.join(TEMP_DIR, file)
+                if os.path.isfile(file_path) and (now - os.path.getmtime(file_path)) > 3600:  # Plus de 1 heure
+                    try:
+                        os.remove(file_path)
+                        count += 1
+                    except Exception as e:
+                        logger.error(f"Erreur lors de la suppression du fichier {file}: {str(e)}")
+        
+        logger.info(f"Nettoyage terminé: {count} fichiers supprimés")
+    except Exception as e:
+        logger.error(f"Erreur lors du nettoyage des fichiers temporaires: {str(e)}")
+
+# Vérifie la santé de l'application
+@app.route('/health', methods=['GET'])
+def health_check():
+    if request.remote_addr != '127.0.0.1' and not request.remote_addr.startswith('192.168.'):
+        return jsonify({'status': 'OK'}), 200
+    
+    try:
+        status = {
+            'app': 'running',
+            'youtube_accessible': check_youtube_status(),
+            'temp_directory': os.path.exists(TEMP_DIR),
+            'cookies_file': os.path.exists(Path(os.path.dirname(os.path.abspath(__file__))) / 'cookies.txt'),
+            'version': '1.2.0'
+        }
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # Configuration pour le démarrage
 if __name__ == '__main__':
@@ -555,6 +676,9 @@ if __name__ == '__main__':
     
     # S'assurer que le cookie existe
     ensure_valid_cookie()
+    
+    # Effectuer une première maintenance
+    scheduled_maintenance()
     
     # Démarrer le serveur
     port = int(os.environ.get('PORT', 5000))
