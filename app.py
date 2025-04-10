@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 import googleapiclient.discovery
 import googleapiclient.errors
+import json
+import traceback
 
 # Configuration
 app = Flask(__name__)
@@ -26,6 +28,9 @@ API_KEYS = [
     "YOUR_API_KEY_2",
     "YOUR_API_KEY_3"
 ]
+
+# Index de la clé API actuelle
+current_api_key_index = 0
 
 # Rate limiting optimisé avec expiration automatique
 rate_limit_cache = {}
@@ -75,9 +80,42 @@ def extract_video_id(url):
 def index():
     return render_template('index.html')
 
-# Obtenir une clé API aléatoire pour répartir la charge
+# Obtenir une clé API avec système de rotation en cas d'échec
 def get_api_key():
-    return random.choice(API_KEYS)
+    global current_api_key_index
+    # Utiliser la clé courante
+    return API_KEYS[current_api_key_index]
+
+# Passer à la clé API suivante en cas d'erreur de quota
+def rotate_api_key():
+    global current_api_key_index
+    # Passer à la clé suivante, de façon circulaire
+    current_api_key_index = (current_api_key_index + 1) % len(API_KEYS)
+    logger.info(f"Rotation de clé API: passage à l'index {current_api_key_index}")
+    return API_KEYS[current_api_key_index]
+
+# Créer une instance de l'API YouTube
+def create_youtube_api(attempt=0):
+    if attempt >= len(API_KEYS):
+        raise Exception("Toutes les clés API YouTube sont épuisées")
+    
+    try:
+        api_key = get_api_key()
+        logger.info(f"Utilisation de la clé API: {api_key[:5]}...")
+        
+        return googleapiclient.discovery.build(
+            "youtube", "v3", 
+            developerKey=api_key,
+            cache_discovery=False
+        )
+    except googleapiclient.errors.HttpError as e:
+        error_message = str(e)
+        if "quota" in error_message.lower():
+            logger.warning(f"Quota dépassé pour la clé API. Rotation.")
+            rotate_api_key()
+            return create_youtube_api(attempt + 1)
+        else:
+            raise
 
 # Obtenir les informations de la vidéo via l'API YouTube v3
 @app.route('/info', methods=['POST'])
@@ -90,61 +128,87 @@ def video_info():
         if not url:
             return jsonify({'error': 'Aucune URL fournie'}), 400
         
+        logger.info(f"Tentative d'extraction d'info pour URL: {url}")
+        
         # Vérifier si c'est bien une URL YouTube
         video_id = extract_video_id(url)
         if not video_id:
             return jsonify({'error': 'URL YouTube non valide'}), 400
             
-        # Initialiser l'API YouTube avec une clé aléatoire
-        youtube = googleapiclient.discovery.build(
-            "youtube", "v3", developerKey=get_api_key(),
-            cache_discovery=False
-        )
+        logger.info(f"Video ID extrait: {video_id}")
         
-        # Récupérer les détails de la vidéo via l'API
-        request_video = youtube.videos().list(
-            part="snippet,contentDetails,statistics",
-            id=video_id
-        )
-        response = request_video.execute()
-        
-        # Vérifier si la vidéo existe
-        if not response['items']:
-            return jsonify({'error': 'Vidéo non disponible ou privée'}), 404
-        
-        video_data = response['items'][0]
-        
-        # Récupérer les détails de durée
-        duration_str = video_data['contentDetails']['duration']  # Format ISO 8601
-        duration = parse_duration(duration_str)
+        # Initialiser l'API YouTube avec système de rotation
+        try:
+            youtube = create_youtube_api()
+            
+            # Récupérer les détails de la vidéo via l'API
+            request_video = youtube.videos().list(
+                part="snippet,contentDetails,statistics",
+                id=video_id
+            )
+            response = request_video.execute()
+            
+            # Vérifier si la vidéo existe
+            if not response['items']:
+                return jsonify({'error': 'Vidéo non disponible ou privée'}), 404
+            
+            video_data = response['items'][0]
+            
+            # Récupérer les détails de durée
+            duration_str = video_data['contentDetails']['duration']  # Format ISO 8601
+            duration = parse_duration(duration_str)
+            
+        except googleapiclient.errors.HttpError as e:
+            try:
+                error_details = json.loads(e.content.decode('utf-8'))
+                error_message = error_details['error']['message']
+            except:
+                error_message = str(e)
+            
+            logger.error(f"Erreur API YouTube: {error_message}")
+            
+            if "quota" in error_message.lower():
+                # Rotation de clé API si quota dépassé
+                rotate_api_key()
+                return jsonify({'error': 'Erreur temporaire du service. Veuillez réessayer.'}), 503
+            else:
+                return jsonify({'error': f'Erreur API YouTube: {error_message}'}), e.resp.status
         
         # Pour les formats disponibles, nous devons toujours utiliser yt-dlp
         # car l'API YouTube ne fournit pas cette information
-        yt_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'skip_download': True,
-            'youtube_include_dash_manifest': False,
-        }
+        try:
+            yt_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'youtube_include_dash_manifest': False,
+                'socket_timeout': 15,
+                'retries': 3
+            }
+            
+            with yt_dlp.YoutubeDL(yt_opts) as ydl:
+                formats_info = ydl.extract_info(url, download=False)
+                
+                # Traitement optimisé des formats
+                formats = []
+                for f in formats_info.get('formats', []):
+                    # Ne conserver que les formats vidéo+audio ou audio seul
+                    if (f.get('vcodec') != 'none' or f.get('acodec') != 'none'):
+                        formats.append({
+                            'format_id': f['format_id'],
+                            'ext': f['ext'],
+                            'resolution': f.get('resolution') or f"{f.get('height', '')}p",
+                            'format_note': f.get('format_note', ''),
+                            'filesize': f.get('filesize') or f.get('filesize_approx', 0)
+                        })
+                
+                # Tri optimisé des formats
+                formats.sort(key=lambda x: (0 if x['ext'] == 'mp4' else 1, -(x['filesize'] or 0)))
         
-        with yt_dlp.YoutubeDL(yt_opts) as ydl:
-            formats_info = ydl.extract_info(url, download=False)
-            
-            # Traitement optimisé des formats
-            formats = []
-            for f in formats_info.get('formats', []):
-                # Ne conserver que les formats vidéo+audio ou audio seul
-                if (f.get('vcodec') != 'none' or f.get('acodec') != 'none'):
-                    formats.append({
-                        'format_id': f['format_id'],
-                        'ext': f['ext'],
-                        'resolution': f.get('resolution') or f"{f.get('height', '')}p",
-                        'format_note': f.get('format_note', ''),
-                        'filesize': f.get('filesize') or f.get('filesize_approx', 0)
-                    })
-            
-            # Tri optimisé des formats
-            formats.sort(key=lambda x: (0 if x['ext'] == 'mp4' else 1, -(x['filesize'] or 0)))
+        except Exception as yt_error:
+            logger.error(f"Erreur yt-dlp: {str(yt_error)}")
+            # Si yt-dlp échoue, on renvoie au moins les informations de base obtenues via l'API
+            formats = [{"format_id": "best", "ext": "mp4", "resolution": "Auto", "format_note": "Meilleure qualité disponible"}]
         
         # Construire le résultat avec les données de l'API et les formats de yt-dlp
         result = {
@@ -161,22 +225,10 @@ def video_info():
         logger.info(f"Extraction API réussie pour vidéo ID: {video_id}")
         return jsonify(result)
         
-    except googleapiclient.errors.HttpError as e:
-        error_details = json.loads(e.content)
-        error_message = error_details['error']['message']
-        status_code = e.resp.status
-        
-        logger.error(f"Erreur API YouTube: {error_message}")
-        
-        if "quota" in error_message.lower():
-            # Rotation de clé API si quota dépassé
-            return jsonify({'error': 'Erreur temporaire du service. Veuillez réessayer.'}), 503
-        else:
-            return jsonify({'error': f'Erreur API YouTube: {error_message}'}), status_code
-            
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Erreur lors de l'extraction des infos: {error_msg}")
+        logger.error(traceback.format_exc())  # Ajout du stack trace complet
         return jsonify({'error': 'Erreur lors de l\'extraction des informations. Veuillez réessayer.'}), 500
 
 # Parser la durée en format ISO 8601 (PT1H30M15S)
@@ -215,6 +267,8 @@ def download_video():
         if not url or not format_id:
             return jsonify({'error': 'URL ou format manquant'}), 400
         
+        logger.info(f"Tentative de téléchargement pour URL: {url}, format: {format_id}")
+        
         # Vérifier si c'est bien une URL YouTube
         video_id = extract_video_id(url)
         if not video_id:
@@ -225,11 +279,9 @@ def download_video():
         output_path = os.path.join(TEMP_DIR, filename)
         
         # Vérifier d'abord via l'API si la vidéo est disponible
+        video_title = None
         try:
-            youtube = googleapiclient.discovery.build(
-                "youtube", "v3", developerKey=get_api_key(),
-                cache_discovery=False
-            )
+            youtube = create_youtube_api()
             
             request_video = youtube.videos().list(
                 part="snippet,status",
@@ -248,9 +300,11 @@ def download_video():
                 
             # Récupérer le titre pour le nom du fichier
             video_title = video_data['snippet']['title']
+            logger.info(f"Titre vidéo via API: {video_title}")
+            
         except googleapiclient.errors.HttpError as e:
-            # En cas d'erreur API, continuer avec yt-dlp
-            video_title = None
+            # En cas d'erreur API, on continue avec yt-dlp
+            logger.warning(f"Impossible d'obtenir les infos via API: {str(e)}")
         
         # Options de téléchargement optimisées pour yt-dlp
         ydl_opts = {
@@ -264,43 +318,67 @@ def download_video():
             'fragment_retries': 5
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = video_title or info.get('title', 'video').replace('/', '_').replace('\\', '_')
-            extension = info.get('ext', 'mp4')
-        
-        # Envoyer le fichier avec le nom de la vidéo
-        response = send_file(
-            output_path, 
-            as_attachment=True, 
-            download_name=f"{title}.{extension}",
-            mimetype=f"video/{extension}" if extension != 'mp3' else "audio/mpeg"
-        )
-        
-        # Ajouter des en-têtes pour éviter les caches
-        response.headers.update({
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-        })
-        
-        # Nettoyage du fichier après l'envoi
-        @response.call_on_close
-        def cleanup():
-            try:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                    logger.info(f"Fichier nettoyé: {output_path}")
-            except Exception as e:
-                logger.error(f"Erreur lors du nettoyage de fichier: {str(e)}")
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                logger.info(f"Téléchargement avec yt-dlp démarré")
+                info = ydl.extract_info(url, download=True)
+                title = video_title or info.get('title', 'video').replace('/', '_').replace('\\', '_')
+                extension = info.get('ext', 'mp4')
+                logger.info(f"Téléchargement terminé: {title}.{extension}")
                 
-        logger.info(f"Téléchargement réussi pour vidéo ID: {video_id}")
-        
-        return response
+                # Vérifier que le fichier a bien été créé
+                if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                    raise Exception("Le fichier téléchargé est vide ou n'existe pas")
+                
+                # Envoyer le fichier avec le nom de la vidéo
+                response = send_file(
+                    output_path, 
+                    as_attachment=True, 
+                    download_name=f"{title}.{extension}",
+                    mimetype=f"video/{extension}" if extension != 'mp3' else "audio/mpeg"
+                )
+                
+                # Ajouter des en-têtes pour éviter les caches
+                response.headers.update({
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                })
+                
+                # Nettoyage du fichier après l'envoi
+                @response.call_on_close
+                def cleanup():
+                    try:
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
+                            logger.info(f"Fichier nettoyé: {output_path}")
+                    except Exception as e:
+                        logger.error(f"Erreur lors du nettoyage de fichier: {str(e)}")
+                        
+                logger.info(f"Téléchargement réussi pour vidéo ID: {video_id}")
+                
+                return response
+                
+        except yt_dlp.utils.DownloadError as e:
+            error_msg = str(e)
+            logger.error(f"Erreur de téléchargement yt-dlp: {error_msg}")
+            
+            # Messages d'erreur plus spécifiques
+            if "HTTP Error 429" in error_msg:
+                return jsonify({'error': 'Trop de requêtes. Veuillez attendre quelques minutes avant de réessayer.'}), 429
+            elif "Video unavailable" in error_msg:
+                return jsonify({'error': 'Vidéo non disponible. Elle pourrait être privée ou supprimée.'}), 404
+            elif "This video is available for Premium users only" in error_msg:
+                return jsonify({'error': 'Cette vidéo est réservée aux utilisateurs Premium.'}), 403
+            elif "Requested format is not available" in error_msg:
+                return jsonify({'error': 'Le format demandé n\'est plus disponible. Veuillez actualiser et réessayer.'}), 400
+            else:
+                return jsonify({'error': f'Erreur lors du téléchargement: {error_msg}'}), 500
         
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Erreur de téléchargement: {error_msg}")
+        logger.error(traceback.format_exc())  # Ajout du stack trace complet
         
         # Messages d'erreur plus conviviaux
         if "HTTP Error 429" in error_msg:
@@ -320,28 +398,93 @@ def health_check():
     
     try:
         # Tester rapidement l'API YouTube
+        try:
+            youtube = create_youtube_api()
+            
+            # Simple appel API pour vérifier que l'API fonctionne
+            test_request = youtube.videos().list(
+                part="id",
+                chart="mostPopular",
+                maxResults=1
+            )
+            test_response = test_request.execute()
+            api_status = 'accessible'
+        except Exception as api_error:
+            api_status = f'erreur: {str(api_error)}'
+        
+        # Vérifier yt-dlp
+        try:
+            ydl_version = yt_dlp.version.__version__
+            ydl_status = f'version {ydl_version}'
+        except Exception as ydl_error:
+            ydl_status = f'erreur: {str(ydl_error)}'
+        
+        status = {
+            'app': 'running',
+            'youtube_api': api_status,
+            'yt_dlp': ydl_status,
+            'temp_directory': os.path.exists(TEMP_DIR),
+            'version': '2.1.0'
+        }
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# Route pour tester une clé API YouTube
+@app.route('/test_api_key', methods=['POST'])
+def test_api_key():
+    # Limiter cette fonction aux appels locaux ou administratifs
+    if request.remote_addr != '127.0.0.1' and not request.remote_addr.startswith('192.168.'):
+        return jsonify({'error': 'Accès non autorisé'}), 403
+    
+    try:
+        data = request.json
+        api_key = data.get('api_key')
+        
+        if not api_key:
+            return jsonify({'error': 'Clé API manquante'}), 400
+            
+        # Tester la clé API
         youtube = googleapiclient.discovery.build(
-            "youtube", "v3", developerKey=get_api_key(),
+            "youtube", "v3", 
+            developerKey=api_key,
             cache_discovery=False
         )
         
-        # Simple appel API pour vérifier que l'API fonctionne
+        # Simple appel API pour vérifier le quota
         test_request = youtube.videos().list(
             part="id",
             chart="mostPopular",
             maxResults=1
         )
-        test_request.execute()
+        response = test_request.execute()
         
-        status = {
-            'app': 'running',
-            'youtube_api': 'accessible',
-            'temp_directory': os.path.exists(TEMP_DIR),
-            'version': '2.0.0'
-        }
-        return jsonify(status)
+        # Obtenir les informations de quota
+        quota_request = youtube.quota().get()
+        quota_info = quota_request.execute()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Clé API valide',
+            'quota_info': quota_info
+        })
+        
+    except googleapiclient.errors.HttpError as e:
+        try:
+            error_details = json.loads(e.content.decode('utf-8'))
+            error_message = error_details['error']['message']
+        except:
+            error_message = str(e)
+            
+        return jsonify({
+            'status': 'error',
+            'message': error_message
+        }), 400
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 # Fonction pour nettoyer les fichiers temporaires
 def clean_temp_files():
